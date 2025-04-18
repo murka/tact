@@ -1,15 +1,15 @@
 import {
     getStaticFunction,
     resolveDescriptors,
-} from "../../types/resolveDescriptors";
-import { WriterContext } from "../Writer";
-import { writeExpression } from "./writeExpression";
-import { openContext } from "../../context/store";
-import { resolveStatements } from "../../types/resolveStatements";
-import { CompilerContext } from "../../context/context";
-import { getParser } from "../../grammar";
-import { getAstFactory } from "../../ast/ast-helpers";
-import { defaultParser } from "../../grammar/grammar";
+} from "@/types/resolveDescriptors";
+import { WriterContext } from "@/generator/Writer";
+import { writeExpression } from "@/generator/writers/writeExpression";
+import { openContext, parseModules } from "@/context/store";
+import { resolveStatements } from "@/types/resolveStatements";
+import { CompilerContext } from "@/context/context";
+import { getParser } from "@/grammar";
+import { getAstFactory } from "@/ast/ast-helpers";
+import type { Source } from "@/imports/source";
 
 const code = `
 
@@ -63,7 +63,7 @@ const golden: string[] = [
     `$j'a`,
     "$A$_get_b($A$_constructor_a_b(1, $b))",
     `((- $j'b) + $a)`,
-    `(((- $j'b) + $a) + (+ $b))`,
+    `(((- $j'b) + $a) + $b)`,
     "null()",
     "($o + 1)",
     `$A$_store_cell(($j'a, $j'b))`,
@@ -72,14 +72,17 @@ const golden: string[] = [
 describe("writeExpression", () => {
     it("should write expression", () => {
         const ast = getAstFactory();
+        const sources: Source[] = [
+            { code: code, path: "<unknown>", origin: "user" },
+        ];
         let ctx = openContext(
             new CompilerContext(),
-            [{ code: code, path: "<unknown>", origin: "user" }],
+            sources,
             [],
-            getParser(ast, defaultParser),
+            parseModules(sources, getParser(ast)),
         );
         ctx = resolveDescriptors(ctx, ast);
-        ctx = resolveStatements(ctx, ast);
+        ctx = resolveStatements(ctx);
         const main = getStaticFunction(ctx, "main");
         if (main.ast.kind !== "function_def") {
             throw Error("Unexpected function kind");

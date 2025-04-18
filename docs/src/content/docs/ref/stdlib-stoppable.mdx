@@ -1,9 +1,9 @@
 ---
 title: "@stdlib/stoppable"
-description: "Provides traits that allow to stop a contract, which are useful for emergency or maintenance modes"
+description: "Provides traits that allow stopping a contract, which is useful for emergency or maintenance modes"
 ---
 
-Provides [traits](/book/types#composite-types) that allow to stop a [contract](/book/contracts). Useful for emergency or maintenance modes. Requires an [`Ownable{:tact}`](/ref/stdlib-ownable#ownable) trait from [`@stdlib/ownable`](/ref/stdlib-ownable). This trait just manages a single flag `stopped` in the contract and handling stopped state have to be done in the contract itself.
+Provides [traits](/book/types#composite-types) that allow stopping a [contract](/book/contracts). Useful for emergency or maintenance modes. Requires an [`Ownable{:tact}`](/ref/stdlib-ownable#ownable) trait from [`@stdlib/ownable`](/ref/stdlib-ownable). This trait manages a single flag `stopped` in the contract, and handling the stopped state must be done in the contract itself.
 
 To use this library, import `@stdlib/stoppable`:
 
@@ -15,24 +15,37 @@ import "@stdlib/stoppable"; // this would automatically import @stdlib/ownable t
 
 ### Stoppable
 
-[Trait](/book/types#composite-types) `Stoppable{:tact}` implements receiver for the [Message](/book/structs-and-messages#messages) [string](/book/types#primitive-types) "Stop" that can be sent by owner, implements `stopped(){:tact}` [getter function](/book/functions#getter-functions) that returns `true{:tact}` if contract is stopped (or `false{:tact}` otherwise) and provides private (non-getter) functions `requireNotStopped(){:tact}` and `requireStopped(){:tact}`.
+[Trait](/book/types#composite-types) `Stoppable{:tact}` implements a receiver for the [Message](/book/structs-and-messages#messages) [string](/book/types#primitive-types) "Stop" that can be sent by the owner. It implements the `stopped(){:tact}` [getter function](/book/functions#getter-functions) that returns `true{:tact}` if the contract is stopped (or `false{:tact}` otherwise) and provides private (non-getter) functions `requireNotStopped(){:tact}` and `requireStopped(){:tact}`.
 
 Source code:
 
 ```tact
 @interface("org.ton.stoppable")
 trait Stoppable with Ownable {
+    /// Whether the contract is stopped.
     stopped: Bool;
+
+    /// The owner of the contract.
     owner: Address;
 
+    /// Requires the contract to be not stopped.
+    ///
+    /// #### Error codes
+    ///
+    /// * 133 — if the contract is stopped
+    ///
     fun requireNotStopped() {
-        require(!self.stopped, "Contract stopped");
+        throwUnless(TactExitCodeContractStopped, !self.stopped);
     }
 
+    /// Requires the contract to be stopped.
     fun requireStopped() {
         require(self.stopped, "Contract not stopped");
     }
 
+    /// Receiver for the message `"Stop"` that stops the contract.
+    ///
+    /// Can only be called by the owner and if the contract is not stopped already.
     receive("Stop") {
         self.requireOwner();
         self.requireNotStopped();
@@ -40,6 +53,7 @@ trait Stoppable with Ownable {
         self.reply("Stopped".asComment());
     }
 
+    /// Returns `true` if the contract is stopped (or `false` otherwise).
     get fun stopped(): Bool {
         return self.stopped;
     }
@@ -65,16 +79,22 @@ contract MyContract with Stoppable {
 
 ### Resumable
 
-`Resumable{:tact}` [trait](/book/types#composite-types) extends [`Stoppable{:tact}`](#stoppable) trait and allows to resume [contract](/book/contracts) execution.
+The `Resumable{:tact}` [trait](/book/types#composite-types) extends the [`Stoppable{:tact}`](#stoppable) trait and allows resuming [contract](/book/contracts) execution.
 
 Source code:
 
 ```tact
 @interface("org.ton.resumable")
 trait Resumable with Stoppable {
+    /// Whether the contract is stopped.
     stopped: Bool;
+
+    /// The owner of the contract.
     owner: Address;
 
+    /// Receiver for the message `"Resume"` that resumes the contract execution.
+    ///
+    /// Can only be called by the owner and if the contract is stopped.
     receive("Resume") {
         self.requireOwner();
         self.requireStopped();
@@ -103,4 +123,4 @@ contract MyContract with Resumable {
 
 ## Sources
 
-* [stoppable.tact](https://github.com/tact-lang/tact/blob/61541b7783098e1af669faccd7d2334c10981c72/stdlib/libs/stoppable.tact)
+* [stoppable.tact](https://github.com/tact-lang/tact/blob/22647aada5fdfcbc27c5d8cae6faadbfd2bf3fc1/src/stdlib/stdlib/libs/stoppable.tact)

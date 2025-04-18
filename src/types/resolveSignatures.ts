@@ -1,35 +1,35 @@
-import * as changeCase from "change-case";
 import type { ABIField } from "@ton/core";
-import type { CompilerContext } from "../context/context";
-import { idToHex } from "../utils/idToHex";
+import type { CompilerContext } from "@/context/context";
+import { idToHex } from "@/utils/idToHex";
 import {
     idTextErr,
     throwConstEvalError,
     throwInternalCompilerError,
-} from "../error/errors";
-import { getType, getAllTypes } from "./resolveDescriptors";
+} from "@/error/errors";
+import { getType, getAllTypes } from "@/types/resolveDescriptors";
 import type {
     BinaryReceiverSelector,
     CommentReceiverSelector,
     ReceiverDescription,
     TypeDescription,
-} from "./types";
-import { throwCompilationError } from "../error/errors";
-import type { AstNumber, AstReceiver } from "../ast/ast";
-import type { FactoryAst } from "../ast/ast-helpers";
-import { commentPseudoOpcode } from "../generator/writers/writeRouter";
-import { dummySrcInfo } from "../grammar";
-import { ensureInt } from "../optimizer/interpreter";
-import { evalConstantExpression } from "../optimizer/constEval";
-import { getAstUtil } from "../ast/util";
-import { sha256, highest32ofSha256 } from "../utils/sha256";
+} from "@/types/types";
+import { throwCompilationError } from "@/error/errors";
+import type * as Ast from "@/ast/ast";
+import type { FactoryAst } from "@/ast/ast-helpers";
+import { commentPseudoOpcode } from "@/generator/writers/writeRouter";
+import { dummySrcInfo } from "@/grammar";
+import { ensureInt } from "@/optimizer/interpreter";
+import { evalConstantExpression } from "@/optimizer/constEval";
+import { getAstUtil } from "@/ast/util";
+import { sha256, highest32ofSha256 } from "@/utils/sha256";
+import { snakeCase } from "@/utils/change-case/snake-case";
 
 export function resolveSignatures(ctx: CompilerContext, Ast: FactoryAst) {
     const util = getAstUtil(Ast);
 
     const signatures: Map<
         string,
-        { signature: string; tlb: string; id: AstNumber | null }
+        { signature: string; tlb: string; id: Ast.Number | null }
     > = new Map();
     function createTypeFormat(
         type: string,
@@ -144,7 +144,7 @@ export function resolveSignatures(ctx: CompilerContext, Ast: FactoryAst) {
                     src.type.type,
                     src.type.format ?? null,
                 );
-                if (src.type.optional) {
+                if (src.type.optional && base !== "address") {
                     base = "Maybe " + base;
                 }
                 return src.name + ":" + base;
@@ -176,7 +176,7 @@ export function resolveSignatures(ctx: CompilerContext, Ast: FactoryAst) {
     function createTupleSignature(name: string): {
         signature: string;
         tlb: string;
-        id: AstNumber | null;
+        id: Ast.Number | null;
     } {
         if (signatures.has(name)) {
             return signatures.get(name)!;
@@ -199,6 +199,12 @@ export function resolveSignatures(ctx: CompilerContext, Ast: FactoryAst) {
                     field.loc,
                 );
             }
+            if (t.kind === "trait") {
+                throwCompilationError(
+                    `Fields with a trait type are not supported`,
+                    field.loc,
+                );
+            }
         }
 
         // Check for no "as remaining" in the middle of the struct or contract
@@ -217,13 +223,25 @@ export function resolveSignatures(ctx: CompilerContext, Ast: FactoryAst) {
             }
         }
 
+        for (const field of t.fields) {
+            if (field.as === "remaining") {
+                const type = field.type;
+                if (type.kind === "ref" && type.optional) {
+                    throwCompilationError(
+                        `The "as remaining" field cannot have optional type`,
+                        field.ast.type.loc,
+                    );
+                }
+            }
+        }
+
         const fields = t.fields.map((v) => createTLBField(v.abi));
 
         // Calculate signature and method id
         const signature = name + "{" + fields.join(",") + "}";
-        let id: AstNumber | null = null;
+        let id: Ast.Number | null = null;
         if (t.ast.kind === "message_decl") {
-            if (t.ast.opcode !== null) {
+            if (t.ast.opcode !== undefined) {
                 // Currently, message opcode expressions do not get typechecked, so
                 // ```
                 // message(true ? 42 : false) TypeError { }
@@ -277,7 +295,7 @@ export function resolveSignatures(ctx: CompilerContext, Ast: FactoryAst) {
         // Calculate TLB
         const tlbHeader =
             id !== null
-                ? `${changeCase.snakeCase(name)}#${idToHex(Number(id.value))}`
+                ? `${snakeCase(name)}#${idToHex(Number(id.value))}`
                 : "_";
         const tlb = tlbHeader + " " + fields.join(" ") + " = " + name;
 
@@ -299,7 +317,7 @@ export function resolveSignatures(ctx: CompilerContext, Ast: FactoryAst) {
     return ctx;
 }
 
-function newMessageOpcode(signature: string): AstNumber {
+function newMessageOpcode(signature: string): Ast.Number {
     return {
         kind: "number",
         base: 10,
@@ -314,7 +332,7 @@ type binOpcode = number;
 
 function checkBinaryMessageReceiver(
     rcv: BinaryReceiverSelector,
-    rcvAst: AstReceiver,
+    rcvAst: Ast.Receiver,
     usedOpcodes: Map<binOpcode, messageType>,
     ctx: CompilerContext,
 ) {
@@ -335,7 +353,7 @@ type commentOpcode = string;
 // "opcode" clashes are highly unlikely in this case, of course
 function checkCommentMessageReceiver(
     rcv: CommentReceiverSelector,
-    rcvAst: AstReceiver,
+    rcvAst: Ast.Receiver,
     usedOpcodes: Map<commentOpcode, messageType>,
 ) {
     const opcode1 = commentPseudoOpcode(rcv.comment, true, rcvAst.loc);

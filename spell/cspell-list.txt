@@ -1,3 +1,4 @@
+Aksakov
 Aliaksandr
 alnum
 Ashimine
@@ -15,7 +16,6 @@ bitstrings
 blockstore
 bocchi
 bounceable
-bounceable
 Brujin
 CCITT
 cheatsheet
@@ -23,11 +23,13 @@ Cheatsheet
 cheatsheets
 Cheatsheets
 cleanall
+CNFT
 codegen
 compilables
 Compilables
 comptime
 Comptime
+CSBT
 Daniil
 Danil
 decompilation
@@ -43,12 +45,15 @@ disasm
 divmod
 dnsresolve
 Domínguez
+dstr
 elseifnot
 Eltociear
 Epva
 errno
 Esorat
 extracurrency
+flamegraph
+flamegraphs
 forall
 formedness
 frontmatter
@@ -62,8 +67,11 @@ guarantor
 Héctor
 hehe
 heisenbugs
+hippity
+Hoppity
 idict
 Ikko
+Ilya
 infixl
 infixr
 initof
@@ -81,6 +89,7 @@ jojo
 jsxdev
 Kaladin
 keccak
+keypair
 knip
 Komarov
 Korshakov
@@ -89,7 +98,10 @@ Laika
 langle
 langtools
 letrec
+learnXinYminutes
 Liskov
+llm
+llms
 logomark
 lparen
 lvalue
@@ -100,13 +112,17 @@ masterchain
 Masterchain
 mathrm
 maxint
+memecoin
 Merkle
 minmax
 mintable
+misparse
+misparsed
 mktemp
 multiformats
 nanoton
 nanotons
+Nemo
 Neovim
 nextra
 nobounce
@@ -116,6 +132,7 @@ nonterminal
 Nonterminal
 notcoin
 Novus
+Nowarp
 Offchain
 omelander
 Ovchinnikov
@@ -149,6 +166,7 @@ seti
 shardchains
 shiki
 Shvetc
+skywardboundd
 Stateinit
 statinit
 stdlib
@@ -164,6 +182,7 @@ stry
 styleguide
 subfolders
 subtyping
+subwallet
 supertypes
 Tactina
 tactlang
@@ -177,6 +196,7 @@ Toncoin
 Toncoins
 tonstudio
 Topup
+Tradoor
 Trunov
 typechecker
 udict
@@ -184,6 +204,7 @@ uintptr
 uints
 unboc
 uncons
+undiscussed
 uninit
 Uninit
 unixfs
@@ -192,6 +213,7 @@ varint
 varuint
 verytactical
 viiii
+Viltrum
 vogons
 Vsevolod
 workchain

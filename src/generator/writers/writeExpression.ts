@@ -3,45 +3,67 @@ import {
     TactConstEvalError,
     throwCompilationError,
     throwInternalCompilerError,
-} from "../../error/errors";
-import type * as A from "../../ast/ast";
-import { getExpType } from "../../types/resolveExpression";
+} from "@/error/errors";
+import type * as Ast from "@/ast/ast";
+import { getExpType } from "@/types/resolveExpression";
 import {
     getStaticConstant,
     getStaticFunction,
     getType,
     hasStaticConstant,
-} from "../../types/resolveDescriptors";
-import type { FieldDescription, TypeDescription } from "../../types/types";
-import { printTypeRef } from "../../types/types";
-import type { WriterContext } from "../Writer";
-import { resolveFuncTypeUnpack } from "./resolveFuncTypeUnpack";
-import { MapFunctions } from "../../abi/map";
-import { GlobalFunctions } from "../../abi/global";
-import { funcIdOf } from "./id";
-import { StructFunctions } from "../../abi/struct";
-import { resolveFuncType } from "./resolveFuncType";
+} from "@/types/resolveDescriptors";
+import type { FieldDescription, TypeDescription } from "@/types/types";
+import { printTypeRef } from "@/types/types";
+import type { TypeRef } from "@/types/types";
+import type { WriterContext } from "@/generator/Writer";
+import { resolveFuncTypeUnpack } from "@/generator/writers/resolveFuncTypeUnpack";
+import { MapFunctions } from "@/abi/map";
+import { GlobalFunctions } from "@/abi/global";
+import { funcIdOf } from "@/generator/writers/id";
+import { StructFunctions } from "@/abi/struct";
+import { resolveFuncType } from "@/generator/writers/resolveFuncType";
 import {
     writeAddress,
     writeCell,
     writeSlice,
     writeString,
-} from "./writeConstant";
-import { ops } from "./ops";
-import { writeCastedExpression } from "./writeFunction";
-import { isLvalue } from "../../types/resolveStatements";
-import { evalConstantExpression } from "../../optimizer/constEval";
-import { getAstUtil } from "../../ast/util";
+} from "@/generator/writers/writeConstant";
+import { ops } from "@/generator/writers/ops";
+import { writeCastedExpression } from "@/generator/writers/writeFunction";
+import { isLvalue } from "@/types/resolveStatements";
+import { evalConstantExpression } from "@/optimizer/constEval";
+import { getAstUtil } from "@/ast/util";
 import {
     eqNames,
     getAstFactory,
     idText,
     tryExtractPath,
-} from "../../ast/ast-helpers";
-import { enabledDebug, enabledNullChecks } from "../../config/features";
+} from "@/ast/ast-helpers";
+import { enabledDebug, enabledNullChecks } from "@/config/features";
+import type { CompilerContext } from "@/context/context";
 
-function isNull(wCtx: WriterContext, expr: A.AstExpression): boolean {
+function isNull(wCtx: WriterContext, expr: Ast.Expression): boolean {
     return getExpType(wCtx.ctx, expr).kind === "null";
+}
+
+function handleStructNullTernary(
+    wCtx: WriterContext,
+    condition: Ast.Expression,
+    structExpr: Ast.Expression,
+    structType: TypeRef,
+    isStructInThenBranch: boolean,
+): string {
+    if (structType.kind === "ref") {
+        const type = getType(wCtx.ctx, structType.name);
+        if (type.kind === "struct" || type.kind === "contract") {
+            if (isStructInThenBranch) {
+                return `(${writeExpressionInCondition(condition, wCtx)} ? ${ops.typeAsOptional(type.name, wCtx)}(${writeExpression(structExpr, wCtx)}) : null())`;
+            } else {
+                return `(${writeExpressionInCondition(condition, wCtx)} ? null() : ${ops.typeAsOptional(type.name, wCtx)}(${writeExpression(structExpr, wCtx)}))`;
+            }
+        }
+    }
+    return "";
 }
 
 function writeStructConstructor(
@@ -76,7 +98,11 @@ function writeStructConstructor(
                 if (arg) {
                     return avoidFunCKeywordNameClash(arg);
                 } else if (v.default !== undefined) {
-                    return writeValue(v.default, ctx);
+                    return writeValue(
+                        v.default,
+                        v.type.kind === "ref" ? v.type.optional : false,
+                        ctx,
+                    );
                 } else {
                     throw Error(
                         `Missing argument for field "${v.name}" in struct "${type.name}"`,
@@ -94,11 +120,15 @@ function writeStructConstructor(
     return name;
 }
 
-export function writeValue(val: A.AstLiteral, wCtx: WriterContext): string {
+export function writeValue(
+    val: Ast.Literal,
+    optional: boolean,
+    wCtx: WriterContext,
+): string {
     switch (val.kind) {
         case "number":
             return val.value.toString(10);
-        case "simplified_string": {
+        case "string": {
             const id = writeString(val.value, wCtx);
             wCtx.used(id);
             return `${id}()`;
@@ -124,7 +154,7 @@ export function writeValue(val: A.AstLiteral, wCtx: WriterContext): string {
             return "null()";
         case "struct_value": {
             // Transform the struct fields into a map for lookup
-            const valMap: Map<string, A.AstLiteral> = new Map();
+            const valMap: Map<string, Ast.Literal> = new Map();
             for (const f of val.args) {
                 valMap.set(idText(f.field), f.initializer);
             }
@@ -139,10 +169,10 @@ export function writeValue(val: A.AstLiteral, wCtx: WriterContext): string {
                     if (field.type.kind === "ref" && field.type.optional) {
                         const ft = getType(wCtx.ctx, field.type.name);
                         if (ft.kind === "struct" && v.kind !== "null") {
-                            return `${ops.typeAsOptional(ft.name, wCtx)}(${writeValue(v, wCtx)})`;
+                            return writeValue(v, true, wCtx);
                         }
                     }
-                    return writeValue(v, wCtx);
+                    return writeValue(v, false, wCtx);
                 } else {
                     throwInternalCompilerError(
                         `Struct value is missing a field: ${field.name}`,
@@ -150,19 +180,23 @@ export function writeValue(val: A.AstLiteral, wCtx: WriterContext): string {
                     );
                 }
             });
-            return `${id}(${fieldValues.join(", ")})`;
+            const value = `${id}(${fieldValues.join(", ")})`;
+            if (optional) {
+                return `${ops.typeAsOptional(structDescription.name, wCtx)}(${value})`;
+            }
+            return value;
         }
         default:
             throwInternalCompilerError("Unrecognized ast literal kind");
     }
 }
 
-export function writePathExpression(path: A.AstId[]): string {
+export function writePathExpression(path: Ast.Id[]): string {
     return [funcIdOf(idText(path[0]!)), ...path.slice(1).map(idText)].join(`'`);
 }
 
 export function writeExpression(
-    f: A.AstExpression,
+    f: Ast.Expression,
     wCtx: WriterContext,
 ): string {
     // literals and constant expressions are covered here
@@ -181,7 +215,7 @@ export function writeExpression(
         const value = evalConstantExpression(f, wCtx.ctx, util, {
             maxLoopIterations: 2n ** 12n,
         });
-        return writeValue(value, wCtx);
+        return writeValue(value, false, wCtx);
     } catch (error) {
         if (!(error instanceof TactConstEvalError) || error.fatal) throw error;
     }
@@ -217,7 +251,11 @@ export function writeExpression(
         // Handle constant
         if (hasStaticConstant(wCtx.ctx, f.text)) {
             const c = getStaticConstant(wCtx.ctx, f.text);
-            return writeValue(c.value!, wCtx);
+            return writeValue(
+                c.value!,
+                c.type.kind === "ref" ? c.type.optional : false,
+                wCtx,
+            );
         }
 
         return funcIdOf(f.text);
@@ -409,7 +447,8 @@ export function writeExpression(
             }
 
             case "+": {
-                return "(+ " + writeExpression(f.operand, wCtx) + ")";
+                // FunC doesn't support unary plus so we just skip it
+                return writeExpression(f.operand, wCtx);
             }
 
             // NOTE: Assert function that ensures that the value is not null
@@ -438,6 +477,19 @@ export function writeExpression(
     //
 
     if (f.kind === "field_access") {
+        // Optimize Context().sender to sender()
+        // This is a special case to improve gas efficiency
+        if (
+            f.aggregate.kind === "static_call" &&
+            f.aggregate.function.text === "context" &&
+            f.aggregate.args.length === 0 &&
+            f.field.text === "sender"
+        ) {
+            // Use sender() directly instead of context().sender
+            wCtx.used("__tact_context_get_sender");
+            return `__tact_context_get_sender()`;
+        }
+
         // Resolve the type of the expression
         const src = getExpType(wCtx.ctx, f.aggregate);
         if (
@@ -489,7 +541,11 @@ export function writeExpression(
             // Getter instead of direct field access
             return `${ops.typeField(srcT.name, field.name, wCtx)}(${writeExpression(f.aggregate, wCtx)})`;
         } else {
-            return writeValue(cst!.value!, wCtx);
+            return writeValue(
+                cst!.value!,
+                cst!.type.kind === "ref" ? cst!.type.optional : false,
+                wCtx,
+            );
         }
     }
 
@@ -648,12 +704,20 @@ export function writeExpression(
                     methodDescr.ast.kind === "asm_function_def" &&
                     methodDescr.self &&
                     methodDescr.ast.shuffle.args.length > 1 &&
-                    methodDescr.ast.shuffle.ret.length === 0
+                    methodDescr.ast.shuffle.ret.length === 0 &&
+                    methodDescr.ast.params.length === 2 // apply only for `fun foo(self: T1, param: T2)`
                 ) {
                     const renderedSelfAndArguments = [s, ...renderedArguments];
                     const selfAndParameters = [
                         "self",
-                        ...methodDescr.params.map((p) => idText(p.name)),
+                        ...methodDescr.params.map((p) => {
+                            if (p.name.kind === "wildcard") {
+                                throwInternalCompilerError(
+                                    "Wildcard parameters in asm shuffle must be discarded on earlier compilation stages",
+                                );
+                            }
+                            return p.name.text;
+                        }),
                     ];
                     const shuffledArgs = methodDescr.ast.shuffle.args.map(
                         (shuffleArg) => {
@@ -727,7 +791,44 @@ export function writeExpression(
     //
 
     if (f.kind === "conditional") {
-        return `(${writeExpression(f.condition, wCtx)} ? ${writeExpression(f.thenBranch, wCtx)} : ${writeExpression(f.elseBranch, wCtx)})`;
+        const thenType = getExpType(wCtx.ctx, f.thenBranch);
+        const elseType = getExpType(wCtx.ctx, f.elseBranch);
+
+        // Handle special case when one branch is null and the other is a struct
+        if (
+            isNull(wCtx, f.thenBranch) &&
+            thenType.kind === "null" &&
+            elseType.kind === "ref" &&
+            !elseType.optional
+        ) {
+            // When the "then" branch is null and "else" is a non-optional struct
+            const result = handleStructNullTernary(
+                wCtx,
+                f.condition,
+                f.elseBranch,
+                elseType,
+                false,
+            );
+            if (result) return result;
+        } else if (
+            isNull(wCtx, f.elseBranch) &&
+            elseType.kind === "null" &&
+            thenType.kind === "ref" &&
+            !thenType.optional
+        ) {
+            // When the "else" branch is null and "then" is a non-optional struct
+            const result = handleStructNullTernary(
+                wCtx,
+                f.condition,
+                f.thenBranch,
+                thenType,
+                true,
+            );
+            if (result) return result;
+        }
+
+        // Default case
+        return `(${writeExpressionInCondition(f.condition, wCtx)} ? ${writeExpression(f.thenBranch, wCtx)} : ${writeExpression(f.elseBranch, wCtx)})`;
     }
 
     //
@@ -737,15 +838,70 @@ export function writeExpression(
     throw Error("Unknown expression");
 }
 
+// Evaluate the `expr` expression and return the resulting literal,
+// or the original expression if the evaluation fails.
+function constEval(
+    expr: Ast.Expression,
+    ctx: CompilerContext,
+): Ast.Literal | Ast.Expression {
+    try {
+        const util = getAstUtil(getAstFactory());
+        const value = evalConstantExpression(expr, ctx, util, {
+            maxLoopIterations: 2n ** 12n,
+        });
+        return value;
+    } catch (error) {
+        if (!(error instanceof TactConstEvalError) || error.fatal) throw error;
+        return expr;
+    }
+}
+
+// This performs various boolean-related optimizations in conditional expressions
+// in `if`, `do-until`, and `while` statements, which consider any non-zero integer as true,
+// and also in the conditional expression (ternary operator).
+export function writeExpressionInCondition(
+    expr: Ast.Expression,
+    wCtx: WriterContext,
+): string {
+    if (expr.kind === "op_binary") {
+        const leftTy = getExpType(wCtx.ctx, expr.left);
+        const rightTy = getExpType(wCtx.ctx, expr.right);
+        const left = constEval(expr.left, wCtx.ctx);
+        const right = constEval(expr.right, wCtx.ctx);
+
+        // Zero inequality comparison optimization for non-optional integers
+        if (
+            leftTy.kind === "ref" &&
+            leftTy.name === "Int" &&
+            !leftTy.optional &&
+            rightTy.kind === "ref" &&
+            rightTy.name === "Int" &&
+            !rightTy.optional
+        ) {
+            if (expr.op === "!=") {
+                if (right.kind === "number" && right.value === 0n) {
+                    // left != 0
+                    return `(${writeExpression(left, wCtx)})`;
+                } else if (left.kind === "number" && left.value === 0n) {
+                    // 0 != right
+                    return `(${writeExpression(right, wCtx)})`;
+                }
+            }
+        }
+    }
+    // fallback: no optimization found
+    return writeExpression(expr, wCtx);
+}
+
 export function writeTypescriptValue(
-    val: A.AstLiteral | undefined,
+    val: Ast.Literal | undefined,
 ): string | undefined {
     if (typeof val === "undefined") return undefined;
 
     switch (val.kind) {
         case "number":
             return val.value.toString(10) + "n";
-        case "simplified_string":
+        case "string":
             return JSON.stringify(val.value);
         case "boolean":
             return val.value ? "true" : "false";

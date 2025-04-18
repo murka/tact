@@ -1,14 +1,14 @@
-import type * as A from "../ast/ast";
-import type { FactoryAst } from "../ast/ast-helpers";
-import { eqNames, idText, isSelfId, isSlice, selfId } from "../ast/ast-helpers";
-import { traverse, traverseAndCheck } from "../ast/iterators";
+import type * as Ast from "@/ast/ast";
+import type { FactoryAst } from "@/ast/ast-helpers";
+import { eqNames, idText, isSelfId, isSlice, selfId } from "@/ast/ast-helpers";
+import { traverse, traverseAndCheck } from "@/ast/iterators";
 import {
     idTextErr,
     throwCompilationError,
     throwInternalCompilerError,
-} from "../error/errors";
-import type { CompilerContext, Store } from "../context/context";
-import { createContextStore } from "../context/context";
+} from "@/error/errors";
+import type { CompilerContext, Store } from "@/context/context";
+import { createContextStore } from "@/context/context";
 import type {
     ConstantDescription,
     FieldDescription,
@@ -19,29 +19,30 @@ import type {
     ReceiverSelector,
     TypeDescription,
     TypeRef,
-} from "./types";
-import { printTypeRef, receiverSelectorName, typeRefEquals } from "./types";
-import { getRawAST } from "../context/store";
-import { cloneNode } from "../ast/clone";
-import { crc16 } from "../utils/crc16";
-import { isSubsetOf } from "../utils/isSubsetOf";
-import { evalConstantExpression } from "../optimizer/constEval";
+} from "@/types/types";
+import {
+    printTypeRef,
+    receiverSelectorName,
+    typeRefEquals,
+} from "@/types/types";
+import { getRawAST } from "@/context/store";
+import { cloneNode } from "@/ast/clone";
+import { crc16 } from "@/utils/crc16";
+import { isSubsetOf } from "@/utils/isSubsetOf";
 import {
     intMapKeyFormats,
     intMapValFormats,
     resolveABIType,
-} from "./resolveABITypeRef";
-import { enabledExternals } from "../config/features";
-import { isRuntimeType } from "./isRuntimeType";
-import { GlobalFunctions } from "../abi/global";
-import { getExpType, resolveExpression } from "./resolveExpression";
-import { addVariable, emptyContext } from "./resolveStatements";
-import { isAssignable } from "./subtyping";
-import type { AstUtil } from "../ast/util";
-import { getAstUtil } from "../ast/util";
-import type { ItemOrigin } from "../imports/source";
-import { isUndefined } from "../utils/array";
-import type { Effect } from "./effects";
+} from "@/types/resolveABITypeRef";
+import { enabledExternals } from "@/config/features";
+import { isRuntimeType } from "@/types/isRuntimeType";
+import { GlobalFunctions } from "@/abi/global";
+import { getExpType, resolveExpression } from "@/types/resolveExpression";
+import { addVariable, emptyContext } from "@/types/resolveStatements";
+import { isAssignable } from "@/types/subtyping";
+import type { ItemOrigin } from "@/imports/source";
+import { isUndefined } from "@/utils/array";
+import type { Effect } from "@/types/effects";
 
 const store = createContextStore<TypeDescription>();
 const staticFunctionsStore = createContextStore<FunctionDescription>();
@@ -49,13 +50,13 @@ const staticConstantsStore = createContextStore<ConstantDescription>();
 
 // this function does not handle the case of structs
 function verifyMapAsAnnotationsForPrimitiveTypes(
-    type: A.AstTypeId,
-    asAnnotation: A.AstId | null,
+    type: Ast.TypeId,
+    asAnnotation: Ast.Id | undefined,
     kind: "keyType" | "valType",
 ): void {
     switch (idText(type)) {
         case "Int": {
-            if (asAnnotation === null) return;
+            if (asAnnotation === undefined) return;
             const ann = idText(asAnnotation);
             switch (kind) {
                 case "keyType":
@@ -79,7 +80,7 @@ function verifyMapAsAnnotationsForPrimitiveTypes(
         case "Address":
         case "Bool":
         case "Cell": {
-            if (asAnnotation !== null) {
+            if (asAnnotation !== undefined) {
                 throwCompilationError(
                     `${idTextErr(type)} type cannot have as-annotation`,
                     asAnnotation.loc,
@@ -94,8 +95,8 @@ function verifyMapAsAnnotationsForPrimitiveTypes(
 }
 
 function verifyMapTypes(
-    typeId: A.AstTypeId,
-    asAnnotation: A.AstId | null,
+    typeId: Ast.TypeId,
+    asAnnotation: Ast.Id | undefined,
     allowedTypeNames: string[],
     kind: "keyType" | "valType",
 ): void {
@@ -108,7 +109,7 @@ function verifyMapTypes(
     verifyMapAsAnnotationsForPrimitiveTypes(typeId, asAnnotation, kind);
 }
 
-function verifyMapType(mapTy: A.AstMapType, isValTypeStruct: boolean) {
+function verifyMapType(mapTy: Ast.MapType, isValTypeStruct: boolean) {
     // optional and other compound key and value types are disallowed at the level of grammar
 
     // check allowed key types
@@ -120,7 +121,7 @@ function verifyMapType(mapTy: A.AstMapType, isValTypeStruct: boolean) {
     );
 
     // check allowed value types
-    if (isValTypeStruct && mapTy.valueStorageType === null) {
+    if (isValTypeStruct && mapTy.valueStorageType === undefined) {
         return;
     }
     // the case for struct/message is already checked
@@ -134,7 +135,7 @@ function verifyMapType(mapTy: A.AstMapType, isValTypeStruct: boolean) {
 
 export const toBounced = (type: string) => `${type}%%BOUNCED%%`;
 
-export function resolveTypeRef(ctx: CompilerContext, type: A.AstType): TypeRef {
+export function resolveTypeRef(ctx: CompilerContext, type: Ast.Type): TypeRef {
     switch (type.kind) {
         case "type_id": {
             const t = getType(ctx, type);
@@ -166,12 +167,12 @@ export function resolveTypeRef(ctx: CompilerContext, type: A.AstType): TypeRef {
                 kind: "map",
                 key: keyTy.name,
                 keyAs:
-                    type.keyStorageType !== null
+                    type.keyStorageType !== undefined
                         ? idText(type.keyStorageType)
                         : null,
                 value: valTy.name,
                 valueAs:
-                    type.valueStorageType !== null
+                    type.valueStorageType !== undefined
                         ? idText(type.valueStorageType)
                         : null,
             };
@@ -187,7 +188,7 @@ export function resolveTypeRef(ctx: CompilerContext, type: A.AstType): TypeRef {
 }
 
 function buildTypeRef(
-    type: A.AstType,
+    type: Ast.Type,
     types: Map<string, TypeDescription>,
 ): TypeRef {
     switch (type.kind) {
@@ -242,12 +243,12 @@ function buildTypeRef(
                 kind: "map",
                 key: idText(type.keyType),
                 keyAs:
-                    type.keyStorageType !== null
+                    type.keyStorageType !== undefined
                         ? idText(type.keyStorageType)
                         : null,
                 value: idText(type.valueType),
                 valueAs:
-                    type.valueStorageType !== null
+                    type.valueStorageType !== undefined
                         ? idText(type.valueStorageType)
                         : null,
             };
@@ -275,7 +276,6 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
     const staticFunctions: Map<string, FunctionDescription> = new Map();
     const staticConstants: Map<string, ConstantDescription> = new Map();
     const ast = getRawAST(ctx);
-    const util = getAstUtil(Ast);
 
     //
     // Register types
@@ -391,7 +391,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
     //
 
     function buildFieldDescription(
-        src: A.AstFieldDecl,
+        src: Ast.FieldDecl,
         index: number,
     ): FieldDescription {
         const fieldTy = buildTypeRef(src.type, types);
@@ -412,7 +412,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
             name: idText(src.name),
             type: fieldTy,
             index,
-            as: src.as !== null ? idText(src.as) : null,
+            as: src.as !== undefined ? idText(src.as) : null,
             default: undefined, // initializer will be evaluated after typechecking
             loc: src.loc,
             ast: src,
@@ -421,7 +421,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
     }
 
     function buildConstantDescription(
-        src: A.AstConstantDef | A.AstConstantDecl,
+        src: Ast.ConstantDef | Ast.ConstantDecl,
     ): ConstantDescription {
         const constDeclTy = buildTypeRef(src.type, types);
         return {
@@ -446,8 +446,8 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
             }
 
             const params: InitParameter[] = [];
-            const args: A.AstTypedParameter[] = [];
-            const statements: A.AstStatement[] = [];
+            const args: Ast.TypedParameter[] = [];
+            const statements: Ast.Statement[] = [];
             for (const r of a.params) {
                 const type = buildTypeRef(r.type, types);
                 params.push({
@@ -472,13 +472,13 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
                                 kind: "id",
                                 text: "self",
                                 loc: r.loc,
-                            }) as A.AstExpression,
+                            }) as Ast.Expression,
                             field: Ast.cloneNode(r.name),
                             loc: r.loc,
-                        }) as A.AstExpression,
+                        }) as Ast.Expression,
                         expression: Ast.cloneNode(r.name),
                         loc: r.loc,
-                    }) as A.AstStatement,
+                    }) as Ast.Statement,
                 );
                 if (s.fields.find((v) => eqNames(v.name, r.name))) {
                     throwCompilationError(
@@ -497,7 +497,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
                     params: args,
                     statements,
                     loc: a.loc,
-                }) as A.AstContractInit,
+                }) as Ast.ContractInit,
                 contract: a,
             };
         }
@@ -683,10 +683,10 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
     function resolveFunctionDescriptor(
         optSelf: TypeRef | null,
         a:
-            | A.AstFunctionDef
-            | A.AstNativeFunctionDecl
-            | A.AstFunctionDecl
-            | A.AstAsmFunctionDef,
+            | Ast.FunctionDef
+            | Ast.NativeFunctionDecl
+            | Ast.FunctionDecl
+            | Ast.AsmFunctionDef,
         origin: ItemOrigin,
     ): FunctionDescription {
         let self = optSelf;
@@ -786,12 +786,6 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
                 isAbstract.loc,
             );
         }
-        if (isVirtual && isOverride) {
-            throwCompilationError(
-                "Overrides functions cannot be virtual",
-                isOverride.loc,
-            );
-        }
         if (isAbstract && isOverride) {
             throwCompilationError(
                 "Overrides functions cannot be abstract",
@@ -850,7 +844,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
         }
 
         // Check for common
-        if (a.kind === "function_def") {
+        if (a.kind === "function_def" || a.kind === "asm_function_def") {
             if (isGetter && !self) {
                 throwCompilationError(
                     "Getters must be defined within a contract",
@@ -864,7 +858,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
             throwCompilationError("Getters cannot be inline", isInline.loc);
         }
 
-        const exNames: Set<string> = new Set();
+        const parameterNameSet: Set<string> = new Set();
 
         // Validate mutating
         if (isExtends) {
@@ -881,7 +875,10 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
                 );
             }
             const firstParam = params[0]!;
-            if (!isSelfId(firstParam.name)) {
+            if (
+                firstParam.name.kind !== "id" ||
+                firstParam.name.text !== "self"
+            ) {
                 throwCompilationError(
                     'Extend function must have first parameter named "self"',
                     firstParam.loc,
@@ -902,7 +899,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
 
             // Update self and remove first parameter
             self = firstParam.type;
-            exNames.add(idText(firstParam.name));
+            parameterNameSet.add(idText(firstParam.name));
             params = params.slice(1);
         }
 
@@ -928,7 +925,10 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
         }
 
         for (const param of params) {
-            if (exNames.has(idText(param.name))) {
+            if (param.name.kind !== "id") {
+                continue;
+            }
+            if (parameterNameSet.has(param.name.text)) {
                 throwCompilationError(
                     `Parameter name ${idTextErr(param.name)} is already used`,
                     param.loc,
@@ -940,7 +940,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
                     param.loc,
                 );
             }
-            exNames.add(idText(param.name));
+            parameterNameSet.add(idText(param.name));
         }
 
         // Check for runtime types in getters
@@ -976,9 +976,17 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
                         a.loc,
                     );
                 }
-                const paramSet = new Set(
-                    a.params.map((typedId) => idText(typedId.name)),
-                );
+                const paramsArray: string[] = [];
+                for (const typedId of a.params) {
+                    if (typedId.name.kind === "wildcard") {
+                        throwCompilationError(
+                            "cannot use wildcards with argument rearrangement",
+                            a.loc,
+                        );
+                    }
+                    paramsArray.push(idText(typedId.name));
+                }
+                const paramSet = new Set(paramsArray);
                 if (!isSubsetOf(paramSet, shuffleArgSet)) {
                     throwCompilationError(
                         "asm argument rearrangement must mention all function parameters",
@@ -1076,7 +1084,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
         };
     }
 
-    function resolveInitFunction(ast: A.AstContractInit): InitDescription {
+    function resolveInitFunction(ast: Ast.ContractInit): InitDescription {
         const params: InitParameter[] = [];
         for (const r of ast.params) {
             params.push({
@@ -1098,7 +1106,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
             }
         }
 
-        function checkNode(node: A.AstNode): boolean {
+        function checkNode(node: Ast.AstNode): boolean {
             if (node.kind === "field_access" || node.kind === "method_call") {
                 // we don't need to check `self.a` or `self.foo()`
                 return false;
@@ -1516,12 +1524,6 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
                                         d.loc,
                                     );
                                 }
-                                if (t.fields.length === t.partialFieldCount) {
-                                    throwCompilationError(
-                                        "This message is small enough for bounce receiver, you need to remove bounced modifier.",
-                                        d.loc,
-                                    );
-                                }
                                 s.receivers.push({
                                     selector: {
                                         kind: "bounce-binary",
@@ -1551,18 +1553,16 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
 
     for (const t of types.values()) {
         if (t.kind === "contract") {
-            if (!t.init) {
-                t.init = {
-                    kind: "init-function",
+            t.init ??= {
+                kind: "init-function",
+                params: [],
+                ast: Ast.createNode({
+                    kind: "contract_init",
                     params: [],
-                    ast: Ast.createNode({
-                        kind: "contract_init",
-                        params: [],
-                        statements: [],
-                        loc: t.ast.loc,
-                    }) as A.AstContractInit,
-                };
-            }
+                    statements: [],
+                    loc: t.ast.loc,
+                }) as Ast.ContractInit,
+            };
         }
     }
 
@@ -1703,17 +1703,38 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
                 continue;
             }
 
-            const foundOverriddenFunction = contractOrTrait.traits.some((t) =>
-                t.functions.has(funInContractOrTrait.name),
-            );
+            const overriddenFunction = contractOrTrait.traits
+                .flatMap((t) => {
+                    const fun = t.functions.get(funInContractOrTrait.name);
+                    if (!fun) return [];
+                    return [fun];
+                })
+                .at(0);
 
-            if (!foundOverriddenFunction) {
+            if (typeof overriddenFunction === "undefined") {
                 const msg =
                     contractOrTrait.traits.length === 0 || inheritOnlyBaseTrait
                         ? `Function "${funInContractOrTrait.name}" overrides nothing, remove "override" modifier or inherit any traits with this function`
                         : `Function "${funInContractOrTrait.name}" overrides nothing, remove "override" modifier`;
 
                 throwCompilationError(msg, funInContractOrTrait.ast.loc);
+            }
+
+            if (
+                !overriddenFunction.isAbstract &&
+                !overriddenFunction.isVirtual
+            ) {
+                // override fun foo() { ... }
+                // ^^^^^^^^
+                const overrideLoc =
+                    funInContractOrTrait.ast.attributes.find(
+                        (it) => it.type === "override",
+                    )?.loc ?? funInContractOrTrait.ast.loc;
+
+                throwCompilationError(
+                    `Cannot override function "${funInContractOrTrait.name}" because function "${funInContractOrTrait.name}" does not have a virtual or abstract modifier in parent trait`,
+                    overrideLoc,
+                );
             }
         }
 
@@ -1726,19 +1747,67 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
                 continue;
             }
 
-            const foundOverriddenConstant = contractOrTrait.traits.some((t) =>
-                t.constants.some(
-                    (c) => c.name === constantInContractOrTrait.name,
-                ),
-            );
+            const overriddenConstant = contractOrTrait.traits
+                .flatMap((t) => {
+                    const constant = t.constants.find(
+                        (it) => it.name == constantInContractOrTrait.name,
+                    );
+                    if (!constant) return [];
+                    return [constant];
+                })
+                .at(0);
 
-            if (!foundOverriddenConstant) {
+            if (typeof overriddenConstant === "undefined") {
                 const msg =
                     contractOrTrait.traits.length === 0 || inheritOnlyBaseTrait
                         ? `Constant "${constantInContractOrTrait.name}" overrides nothing, remove "override" modifier or inherit any traits with this constant`
                         : `Constant "${constantInContractOrTrait.name}" overrides nothing, remove "override" modifier`;
 
                 throwCompilationError(msg, constantInContractOrTrait.ast.loc);
+            }
+
+            const iaAbstractOrVirtual = overriddenConstant.ast.attributes.find(
+                (a) => a.type === "virtual" || a.type === "abstract",
+            );
+
+            if (!iaAbstractOrVirtual) {
+                // override const A: Int = 10;
+                // ^^^^^^^^
+                const overrideLoc =
+                    constantInContractOrTrait.ast.attributes.find(
+                        (it) => it.type === "override",
+                    )?.loc ?? constantInContractOrTrait.ast.loc;
+
+                throwCompilationError(
+                    `Cannot override constant "${constantInContractOrTrait.name}" because constant "${constantInContractOrTrait.name}" does not have a virtual or abstract modifier in parent trait`,
+                    overrideLoc,
+                );
+            }
+        }
+
+        const seenMethods: Map<string, [FunctionDescription, TypeDescription]> =
+            new Map();
+        for (const inheritedTrait of contractOrTrait.traits) {
+            for (const traitFunction of inheritedTrait.functions.values()) {
+                const previousInfo = seenMethods.get(traitFunction.name);
+                if (typeof previousInfo !== "undefined") {
+                    const [method, owner] = previousInfo;
+                    if (
+                        owner !== inheritedTrait &&
+                        !traitFunction.isOverride &&
+                        !method.isOverride
+                    ) {
+                        throwCompilationError(
+                            `Both "${inheritedTrait.name}" and "${owner.name}" define method "${traitFunction.name}"`,
+                            contractOrTrait.ast.name.loc,
+                        );
+                    }
+                }
+
+                seenMethods.set(traitFunction.name, [
+                    traitFunction,
+                    inheritedTrait,
+                ]);
             }
         }
 
@@ -2087,16 +2156,16 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
 
     for (const [k, t] of types) {
         const visited: Set<string> = new Set();
-        const queue: A.AstNode[] = [];
+        const queue: Ast.AstNode[] = [];
 
-        const queuePush = (name: string, element: A.AstNode) => {
+        const queuePush = (name: string, element: Ast.AstNode) => {
             if (visited.has(name)) return;
             visited.add(name);
             queue.push(element);
         };
 
         const dependsOn: Set<string> = new Set();
-        const handler = (src: A.AstNode) => {
+        const handler = (src: Ast.AstNode) => {
             if (src.kind === "init_of" || src.kind === "code_of") {
                 if (!types.has(idText(src.contract))) {
                     throwCompilationError(
@@ -2206,7 +2275,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
     }
 
     // A pass that initializes constants and default field values
-    ctx = initializeConstantsAndDefaultContractAndStructFields(ctx, util);
+    ctx = checkConstantsAndDefaultContractAndStructFields(ctx);
 
     // detect self-referencing or mutually-recursive types
     checkRecursiveTypes(ctx);
@@ -2216,7 +2285,7 @@ export function resolveDescriptors(ctx: CompilerContext, Ast: FactoryAst) {
 
 export function getType(
     ctx: CompilerContext,
-    ident: A.AstId | A.AstTypeId | string,
+    ident: Ast.Id | Ast.TypeId | string,
 ): TypeDescription {
     const name = typeof ident === "string" ? ident : idText(ident);
     const r = store.get(ctx, name);
@@ -2241,10 +2310,8 @@ export function getAllTypes(ctx: CompilerContext): TypeDescription[] {
     return Array.from(getTypeStore(ctx).values());
 }
 
-export function getContracts(ctx: CompilerContext): string[] {
-    return getAllTypes(ctx)
-        .filter((v) => v.kind === "contract")
-        .map((v) => v.name);
+export function getContracts(ctx: CompilerContext): TypeDescription[] {
+    return getAllTypes(ctx).filter((v) => v.kind === "contract");
 }
 
 export function getStaticFunction(
@@ -2343,7 +2410,7 @@ function checkInitializerType(
     name: string,
     kind: "Constant" | "Struct field",
     declTy: TypeRef,
-    initializer: A.AstExpression,
+    initializer: Ast.Expression,
     ctx: CompilerContext,
     selfTypeRef: TypeRef | undefined,
 ): CompilerContext {
@@ -2358,23 +2425,6 @@ function checkInitializerType(
             `${kind} ${idTextErr(name)} has declared type "${printTypeRef(declTy)}", but its initializer has incompatible type "${printTypeRef(initTy)}"`,
             initializer.loc,
         );
-    }
-    return ctx;
-}
-
-function initializeConstants(
-    constants: ConstantDescription[],
-    ctx: CompilerContext,
-    util: AstUtil,
-): CompilerContext {
-    for (const constant of constants) {
-        if (constant.ast.kind === "constant_def") {
-            constant.value ??= evalConstantExpression(
-                constant.ast.initializer,
-                ctx,
-                util,
-            );
-        }
     }
     return ctx;
 }
@@ -2399,9 +2449,8 @@ function checkConstants(
     return ctx;
 }
 
-function initializeConstantsAndDefaultContractAndStructFields(
+function checkConstantsAndDefaultContractAndStructFields(
     ctx: CompilerContext,
-    util: AstUtil,
 ): CompilerContext {
     const staticConstants = getAllStaticConstants(ctx);
 
@@ -2429,7 +2478,7 @@ function initializeConstantsAndDefaultContractAndStructFields(
                     );
 
                     for (const field of aggregateTy.fields) {
-                        if (field.ast.initializer !== null) {
+                        if (field.ast.initializer !== undefined) {
                             ctx = checkInitializerType(
                                 field.name,
                                 "Struct field",
@@ -2438,35 +2487,13 @@ function initializeConstantsAndDefaultContractAndStructFields(
                                 ctx,
                                 selfTypeRef,
                             );
-                            field.default = evalConstantExpression(
-                                field.ast.initializer,
-                                ctx,
-                                util,
-                            );
-                        } else {
-                            // if a field has optional type and it is missing an explicit initializer
-                            // we consider it to be initialized with the null value
-
-                            field.default =
-                                field.type.kind === "ref" && field.type.optional
-                                    ? util.makeNullLiteral(field.ast.loc)
-                                    : undefined;
                         }
                     }
-
-                    // here we actually initialize constants
-                    // see more detail below
-                    ctx = initializeConstants(aggregateTy.constants, ctx, util);
                 }
                 break;
             }
         }
     }
-
-    // and here we initialize all uninitialized constants,
-    // the constant may already be initialized since we call initialization recursively
-    // if one constant depends on another
-    ctx = initializeConstants(staticConstants, ctx, util);
 
     return ctx;
 }
@@ -2481,7 +2508,7 @@ function checkRecursiveTypes(ctx: CompilerContext): void {
         (aggregate) => aggregate.kind === "struct",
     );
     let index = 0;
-    const stack: A.AstId[] = [];
+    const stack: Ast.Id[] = [];
     // `string` here means "struct name"
     const indices: Map<string, number> = new Map();
     const lowLinks: Map<string, number> = new Map();
@@ -2505,6 +2532,11 @@ function checkRecursiveTypes(ctx: CompilerContext): void {
                 );
             }
         }
+
+        indices.clear();
+        lowLinks.clear();
+        onStack.clear();
+        selfReferencingVertices.clear();
     }
 
     function strongConnect(struct: TypeDescription) {
@@ -2561,7 +2593,7 @@ function checkRecursiveTypes(ctx: CompilerContext): void {
         }
 
         if (lowLinks.get(struct.name) === indices.get(struct.name)) {
-            const cycle: A.AstId[] = [];
+            const cycle: Ast.Id[] = [];
             let e = "";
             do {
                 const last = stack.pop()!;

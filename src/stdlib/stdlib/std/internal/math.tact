@@ -4,8 +4,6 @@
 ///
 /// Randomizes the pseudorandom number generator with the specified unsigned 256-bit `Int` `x` by mixing it with the current seed. The new seed is the unsigned 256-bit `Int` value of the SHA-256 hash of concatenated old seed and `x` in their 32-byte strings big-endian representation.
 ///
-/// Attempts to specify a negative value of `x` throw an exception with exit code 5: `Integer out of expected range`.
-///
 /// ```tact
 /// fun example() {
 ///     nativeRandomize(42);        // now, random numbers are less predictable
@@ -14,9 +12,15 @@
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 5: [Integer out of expected range] — Thrown when attempting to specify a negative value of `x`.
+///
 /// See:
-/// * https://docs.tact-lang.org/ref/core-advanced#nativerandomize
+/// * https://docs.tact-lang.org/ref/core-random#nativerandomize
 /// * https://docs.tact-lang.org/ref/core-random#randomint
+///
+/// [Integer out of expected range]: https://docs.tact-lang.org/book/exit-codes#5
 ///
 asm fun nativeRandomize(x: Int) { ADDRAND }
 
@@ -34,9 +38,9 @@ asm fun nativeRandomize(x: Int) { ADDRAND }
 /// ```
 ///
 /// See:
-/// * https://docs.tact-lang.org/ref/core-advanced#nativerandomizelt
-/// * https://docs.tact-lang.org/ref/core-advanced#nativerandomize
-/// * https://docs.tact-lang.org/ref/core-advanced#curlt
+/// * https://docs.tact-lang.org/ref/core-random#nativerandomizelt
+/// * https://docs.tact-lang.org/ref/core-random#nativerandomize
+/// * https://docs.tact-lang.org/ref/core-contextstate#curlt
 /// * https://docs.tact-lang.org/ref/core-random#randomint
 ///
 asm fun nativeRandomizeLt() { LTIME ADDRAND }
@@ -53,8 +57,8 @@ asm fun nativeRandomizeLt() { LTIME ADDRAND }
 /// ```
 ///
 /// See:
-/// * https://docs.tact-lang.org/ref/core-advanced#nativepreparerandom
-/// * https://docs.tact-lang.org/ref/core-advanced#nativerandomizelt
+/// * https://docs.tact-lang.org/ref/core-random#nativepreparerandom
+/// * https://docs.tact-lang.org/ref/core-random#nativerandomizelt
 /// * https://docs.tact-lang.org/ref/core-random#randomint
 /// * https://docs.tact-lang.org/ref/core-random#random
 ///
@@ -77,11 +81,40 @@ asm fun nativeRandom(): Int { RANDU256 }
 // then z := x * range / 2^256 is computed.
 asm fun nativeRandomInterval(max: Int): Int { RAND }
 
+/// Generates and returns a new pseudo-random unsigned 256-bit `Int` value `x`.
+///
+/// The algorithm works as follows: first, the `sha512(r)` is computed. There, `r` is an old
+/// value of the random seed, which is taken as a 32-byte array constructed from the big-endian
+/// representation of an unsigned 256-bit `Int`. The first 32 bytes of this hash are stored as the new
+/// value `r'` of the random seed, and the remaining 32 bytes are returned as the next random value `x`.
+///
+/// ```tact
+/// fun example() {
+///     let allYourRandomBelongToUs: Int = randomInt(); // ???, it's random :)
+/// }
+/// ```
+///
+/// See: https://docs.tact-lang.org/ref/core-random#randomint
+///
 inline fun randomInt(): Int {
     nativePrepareRandom();
     return nativeRandom();
 }
 
+/// Generates and returns a new pseudo-random unsigned `Int` value `x` in the provided semi-closed
+/// interval: `min` ≤ `x` < `max`, or `min` ≥ `x` > `max` if both `min` and `max` are negative.
+///
+/// Note that the `max` value is never included in the interval.
+///
+/// ```tact
+/// fun example() {
+///     random(42, 43); // 42, always
+///     random(0, 42);  // 0-41, but never 42
+/// }
+/// ```
+///
+/// See: https://docs.tact-lang.org/ref/core-random#random
+///
 inline fun random(min: Int, max: Int): Int {
     nativePrepareRandom();
     return min + nativeRandomInterval(max - min);
@@ -145,23 +178,7 @@ asm fun abs(x: Int): Int { ABS }
 
 /// Global function.
 ///
-/// Returns the current Unix time.
-///
-/// ```tact
-/// fun example() {
-///     let timeOffset: Int = now() + 1000; // thousand seconds from now()
-/// }
-/// ```
-///
-/// See: https://docs.tact-lang.org/ref/core-common#now
-///
-asm fun now(): Int { NOW }
-
-/// Global function.
-///
 /// Computes and returns the logarithm of a number `num` > 0 to the base `base` ≥ 1. Results are rounded down.
-///
-/// Attempts to specify a non-positive `num` value or a `base` less than 1 throw an error with exit code 5: `Integer out of expected range`.
 ///
 /// ```tact
 /// fun examples() {
@@ -181,6 +198,11 @@ asm fun now(): Int { NOW }
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 5: [Integer out of expected range] — Thrown when the given `num` value is non-positive
+///   or the given `base` value is less than 1.
+///
 /// See:
 /// * https://docs.tact-lang.org/ref/core-math#log
 /// * https://docs.tact-lang.org/ref/core-math#log2
@@ -192,8 +214,6 @@ native log(num: Int, base: Int): Int;
 ///
 /// Similar to `log()`, but sets the `base` to 2.
 ///
-/// Attempts to specify a non-positive `num` value throw an error with exit code 5: `Integer out of expected range`.
-///
 /// ```tact
 /// fun example() {
 ///     log2(1024); // 10, as 2^10 is 1024
@@ -202,15 +222,21 @@ native log(num: Int, base: Int): Int;
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 5: [Integer out of expected range] — Thrown when the given `num` value is non-positive.
+///
 /// See:
 /// * https://docs.tact-lang.org/ref/core-math#log2
-/// * https://docs.tact-lang.org/ref/core-math#log
+/// * https://docs.tact-lang.org/ref/core-math#log.
+///
+/// [Integer out of expected range]: https://docs.tact-lang.org/book/exit-codes/#5
 ///
 asm fun log2(num: Int): Int { DUP 5 THROWIFNOT UBITSIZE DEC }
 
 /// Global function.
 ///
-/// Computes and returns the exponentiation involving two numbers: the `base` and the exponent (or _power_) `exp`. Exponent `exp` must be non-negative, otherwise an error with exit code 5 will be thrown: `Integer out of expected range`.
+/// Computes and returns the exponentiation involving two numbers: the `base` and the exponent (or _power_) `exp`.
 ///
 /// This function tries to resolve constant values in compile-time whenever possible.
 ///
@@ -231,14 +257,20 @@ asm fun log2(num: Int): Int { DUP 5 THROWIFNOT UBITSIZE DEC }
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 5: [Integer out of expected range] — Thrown when the given `exp` value is negative.
+///
 /// See:
 /// * https://docs.tact-lang.org/ref/core-math#pow
 /// * https://docs.tact-lang.org/ref/core-math#pow2
 ///
+/// [Integer out of expected range]: https://docs.tact-lang.org/book/exit-codes/#5
+///
 inline fun pow(base: Int, exp: Int): Int {
     throwUnless(5, exp >= 0);
     let result = 1;
-    repeat(exp) {
+    repeat (exp) {
         result *= base;
     }
     return result;
@@ -246,7 +278,7 @@ inline fun pow(base: Int, exp: Int): Int {
 
 /// Global function.
 ///
-/// Similar to `pow()`, but sets the `base` to 2. Exponent `exp` must be non-negative, otherwise an error with exit code 5 will be thrown: `Integer out of expected range`.
+/// Similar to `pow()`, but sets the `base` to 2.
 ///
 /// This function tries to resolve constant values in compile-time whenever possible.
 ///
@@ -267,9 +299,15 @@ inline fun pow(base: Int, exp: Int): Int {
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 5: [Integer out of expected range] — Thrown when attempting to specify a negative value of `exp`.
+///
 /// See:
 /// * https://docs.tact-lang.org/ref/core-math#pow2
 /// * https://docs.tact-lang.org/ref/core-math#pow
+///
+/// [Integer out of expected range]: https://docs.tact-lang.org/book/exit-codes#5
 ///
 asm fun pow2(exp: Int): Int { POW2 }
 
@@ -295,8 +333,6 @@ asm fun sign(x: Int): Int { SGN }
 ///
 /// Computes and returns the rounded up result of division of the `Int` `x` by the `Int` `y`.
 ///
-/// Attempts to divide by `y` equal to 0 throw an exception with exit code 4: `Integer overflow`.
-///
 /// ```tact
 /// fun examples() {
 ///     divc(4, 2);  // 2
@@ -306,15 +342,19 @@ asm fun sign(x: Int): Int { SGN }
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 4: [Integer overflow] — Thrown when the given `y` value is equal to 0.
+///
 /// See: https://docs.tact-lang.org/ref/core-math#divc
+///
+/// [Integer overflow]: https://docs.tact-lang.org/book/exit-codes/#4
 ///
 asm fun divc(x: Int, y: Int): Int { DIVC }
 
 /// Global function. Available since Tact 1.6.0.
 ///
 /// Computes and returns the rounded up result of `(x * y) / z`.
-///
-/// If the value in calculation goes beyond the range from -2^256 to 2^256 - 1 inclusive, or if there's an attempt to divide by `z` equal to 0, an exception with exit code 4 is thrown: `Integer overflow`.
 ///
 /// ```tact
 /// fun examples() {
@@ -327,17 +367,21 @@ asm fun divc(x: Int, y: Int): Int { DIVC }
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 4: [Integer overflow] — Thrown when the value in calculation goes beyond
+///   the range from -2^256 to 2^256 - 1 inclusive, or if there's an attempt to
+///   divide by `z` equal to 0.
+///
 /// See: https://docs.tact-lang.org/ref/core-math#muldivc
+///
+/// [Integer overflow]: https://docs.tact-lang.org/book/exit-codes/#4
 ///
 asm fun muldivc(x: Int, y: Int, z: Int): Int { MULDIVC }
 
 /// Global function. Available since Tact 1.6.0.
 ///
 /// Computes and returns the rounded down result of `(x * y) / 2^z`. It is a more gas-efficient equivalent of doing the bitwise shift right on the result of multiplication of `Int` `x` times `Int` `y`, where `Int` `z` is the right operand of the shift.
-///
-/// If the value in calculation goes beyond the range from -2^256 to 2^256 - 1 inclusive, an exception with exit code 4 is thrown: `Integer overflow`.
-///
-/// Attempts to specify any value of `z` outside the inclusive range from 0 to 256 throw an exception with exit code 5: `Integer out of expected range`.
 ///
 /// ```tact
 /// fun examples() {
@@ -348,17 +392,24 @@ asm fun muldivc(x: Int, y: Int, z: Int): Int { MULDIVC }
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 4: [Integer overflow] — Thrown when the value in calculation goes beyond
+///   the range from -2^256 to 2^256 - 1 inclusive.
+///
+/// * 5: [Integer out of expected range] — Thrown when the given `z` value is
+///   outside the inclusive range from 0 to 256.
+///
 /// See: https://docs.tact-lang.org/ref/core-math#mulshiftright
+///
+/// [Integer overflow]: https://docs.tact-lang.org/book/exit-codes/#4
+/// [Integer out of expected range]: https://docs.tact-lang.org/book/exit-codes/#5
 ///
 asm fun mulShiftRight(x: Int, y: Int, z: Int): Int { MULRSHIFT }
 
 /// Global function. Available since Tact 1.6.0.
 ///
 /// Similar to `mulShiftRight()`, but instead of rounding down, the result value is rounded to the nearest integer. If there are two equally close integers, rounding is done toward the even one.
-///
-/// If the value in calculation goes beyond the range from -2^256 to 2^256 - 1 inclusive, an exception with exit code 4 is thrown: `Integer overflow`.
-///
-/// Attempts to specify any value of `z` outside the inclusive range from 0 to 256 throw an exception with exit code 5: `Integer out of expected range`.
 ///
 /// ```tact
 /// fun examples() {
@@ -369,17 +420,24 @@ asm fun mulShiftRight(x: Int, y: Int, z: Int): Int { MULRSHIFT }
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 4: [Integer overflow] — Thrown when the value in calculation goes beyond
+///   the range from -2^256 to 2^256 - 1 inclusive.
+///
+/// * 5: [Integer out of expected range] — Thrown when the given `z` value is
+///   outside the inclusive range from 0 to 256.
+///
 /// See: https://docs.tact-lang.org/ref/core-math#mulshiftrightround
+///
+/// [Integer overflow]: https://docs.tact-lang.org/book/exit-codes/#4
+/// [Integer out of expected range]: https://docs.tact-lang.org/book/exit-codes/#5
 ///
 asm fun mulShiftRightRound(x: Int, y: Int, z: Int): Int { MULRSHIFTR }
 
 /// Global function. Available since Tact 1.6.0.
 ///
 /// Similar to `mulShiftRight()`, but instead of rounding down, the result value is rounded up.
-///
-/// If the value in calculation goes beyond the range from -2^256 to 2^256 - 1 inclusive, an exception with exit code 4 is thrown: `Integer overflow`.
-///
-/// Attempts to specify any value of `z` outside the inclusive range from 0 to 256 throw an exception with exit code 5: `Integer out of expected range`.
 ///
 /// ```tact
 /// fun examples() {
@@ -390,15 +448,24 @@ asm fun mulShiftRightRound(x: Int, y: Int, z: Int): Int { MULRSHIFTR }
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 4: [Integer overflow] — Thrown when the value in calculation goes beyond
+///   the range from -2^256 to 2^256 - 1 inclusive.
+///
+/// * 5: [Integer out of expected range] — Thrown when the given `z` value is
+///   outside the inclusive range from 0 to 256.
+///
 /// See: https://docs.tact-lang.org/ref/core-math#mulshiftrightceil
+///
+/// [Integer overflow]: https://docs.tact-lang.org/book/exit-codes/#4
+/// [Integer out of expected range]: https://docs.tact-lang.org/book/exit-codes/#5
 ///
 asm fun mulShiftRightCeil(x: Int, y: Int, z: Int): Int { MULRSHIFTC }
 
 /// Global function. Available since Tact 1.6.0.
 ///
 /// Computes the square root of the `Int` value `num`. Returns the result rounded to the nearest integer. If there are two equally close integers, rounding is done toward the even one.
-///
-/// Attempts to specify a negative value of `num` throw an exception with exit code 5: `Integer out of expected range`.
 ///
 /// ```tact
 /// fun examples() {
@@ -411,7 +478,13 @@ asm fun mulShiftRightCeil(x: Int, y: Int, z: Int): Int { MULRSHIFTC }
 /// }
 /// ```
 ///
+/// #### Exit codes
+///
+/// * 5: [Integer out of expected range] — Thrown when attempting to specify a negative value of `num`.
+///
 /// See: https://docs.tact-lang.org/ref/core-math#sqrt
+///
+/// [Integer out of expected range]: https://docs.tact-lang.org/book/exit-codes#5
 ///
 fun sqrt(num: Int): Int {
     if (num == 0) {

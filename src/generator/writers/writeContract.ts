@@ -1,31 +1,29 @@
 import {
     enabledInline,
     enabledInterfacesGetter,
+    enabledInternalExternalReceiversOutsideMethodsMap,
     enabledIpfsAbiGetter,
     enabledLazyDeploymentCompletedGetter,
     enabledOptimizedChildCode,
-} from "../../config/features";
-import type { InitDescription, TypeDescription } from "../../types/types";
-import type { WriterContext } from "../Writer";
-import { funcIdOf, funcInitIdOf } from "./id";
-import { ops } from "./ops";
-import { resolveFuncPrimitive } from "./resolveFuncPrimitive";
-import { resolveFuncType } from "./resolveFuncType";
-import { resolveFuncTypeUnpack } from "./resolveFuncTypeUnpack";
-import { writeValue } from "./writeExpression";
-import { writeGetter, writeStatement } from "./writeFunction";
-import { writeInterfaces } from "./writeInterfaces";
+} from "@/config/features";
+import type { InitDescription, TypeDescription } from "@/types/types";
+import type { WriterContext } from "@/generator/Writer";
+import { funcIdOf, funcInitIdOf } from "@/generator/writers/id";
+import { ops } from "@/generator/writers/ops";
+import { resolveFuncPrimitive } from "@/generator/writers/resolveFuncPrimitive";
+import { resolveFuncType } from "@/generator/writers/resolveFuncType";
+import { resolveFuncTypeUnpack } from "@/generator/writers/resolveFuncTypeUnpack";
+import { writeValue } from "@/generator/writers/writeExpression";
+import { writeGetter, writeStatement } from "@/generator/writers/writeFunction";
+import { writeInterfaces } from "@/generator/writers/writeInterfaces";
 import {
     groupContractReceivers,
     writeBouncedRouter,
+    writeLoadOpcode,
     writeNonBouncedRouter,
-} from "./writeRouter";
-import type { ItemOrigin } from "../../imports/source";
-import { resolveFuncTypeFromAbiUnpack } from "./resolveFuncTypeFromAbiUnpack";
-import { getAllocation } from "../../storage/resolveAllocation";
-import { contractErrors } from "../../abi/errors";
-
-const SMALL_CONTRACT_MAX_FIELDS = 5;
+} from "@/generator/writers/writeRouter";
+import { resolveFuncTypeFromAbiUnpack } from "@/generator/writers/resolveFuncTypeFromAbiUnpack";
+import { getAllocation } from "@/storage/resolveAllocation";
 
 export type ContractsCodes = Record<
     string,
@@ -36,108 +34,99 @@ export type ContractsCodes = Record<
     | undefined
 >;
 
-export function writeStorageOps(
-    type: TypeDescription,
-    origin: ItemOrigin,
-    ctx: WriterContext,
+export function writeContractStorageOps(
+    contract: TypeDescription,
+    wCtx: WriterContext,
 ) {
-    const isSmall = type.fields.length <= SMALL_CONTRACT_MAX_FIELDS;
-
     // Load function
-    ctx.fun(ops.contractLoad(type.name, ctx), () => {
-        ctx.signature(
-            `${resolveFuncType(type, ctx)} ${ops.contractLoad(type.name, ctx)}()`,
+    wCtx.fun(ops.contractLoad(contract.name, wCtx), () => {
+        wCtx.signature(
+            `${resolveFuncType(contract, wCtx)} ${ops.contractLoad(contract.name, wCtx)}()`,
         );
-        ctx.flag("impure");
-        if (isSmall) {
-            ctx.flag("inline");
-        }
-        ctx.context("type:" + type.name + "$init");
-        ctx.body(() => {
+        wCtx.flag("impure");
+        wCtx.flag("inline");
+        wCtx.context("type:" + contract.name + "$init");
+        wCtx.body(() => {
             // Load data slice
-            ctx.append(`slice $sc = get_data().begin_parse();`);
+            wCtx.append(`slice $sc = get_data().begin_parse();`);
 
             // Load context
             if (
-                type.dependsOn.length > 0 &&
-                !enabledOptimizedChildCode(ctx.ctx)
+                contract.dependsOn.length > 0 &&
+                !enabledOptimizedChildCode(wCtx.ctx)
             ) {
-                ctx.append(`__tact_child_contract_codes = $sc~load_ref();`);
+                wCtx.append(`__tact_child_contract_codes = $sc~load_ref();`);
             }
 
-            if (type.init?.kind !== "contract-params") {
-                ctx.append(`int $loaded = $sc~load_int(1);`);
+            if (contract.init?.kind !== "contract-params") {
+                wCtx.append(`int $loaded = $sc~load_int(1);`);
 
                 // Load data
-                ctx.append(`if ($loaded) {`);
-                ctx.inIndent(() => {
-                    if (type.fields.length > 0) {
-                        ctx.append(
-                            `return $sc~${ops.reader(type.name, "with-opcode", ctx)}();`,
+                wCtx.inBlock("if ($loaded)", () => {
+                    if (contract.fields.length > 0) {
+                        wCtx.append(
+                            `return $sc~${ops.reader(contract.name, "with-opcode", wCtx)}();`,
                         );
                     } else {
-                        ctx.append(`return null();`);
+                        wCtx.append(`return null();`);
                     }
                 });
-                ctx.append(`} else {`);
-                ctx.inIndent(() => {
+                wCtx.inBlock("else", () => {
                     // Load arguments
-                    if (type.init!.params.length > 0) {
-                        ctx.append(
-                            `(${type.init!.params.map((v) => resolveFuncType(v.type, ctx) + " " + funcIdOf(v.name)).join(", ")}) = $sc~${ops.reader(funcInitIdOf(type.name), "with-opcode", ctx)}();`,
+                    if (contract.init!.params.length > 0) {
+                        wCtx.append(
+                            `(${contract.init!.params.map((v) => resolveFuncType(v.type, wCtx) + " " + funcIdOf(v.name)).join(", ")}) = $sc~${ops.reader(funcInitIdOf(contract.name), "with-opcode", wCtx)}();`,
                         );
-                        ctx.append(`$sc.end_parse();`);
+                        wCtx.append(`$sc.end_parse();`);
                     }
 
                     // Execute init function
-                    ctx.append(
-                        `return ${ops.contractInit(type.name, ctx)}(${[...type.init!.params.map((v) => funcIdOf(v.name))].join(", ")});`,
+                    wCtx.append(
+                        `return ${ops.contractInit(contract.name, wCtx)}(${[...contract.init!.params.map((v) => funcIdOf(v.name))].join(", ")});`,
                     );
                 });
-
-                ctx.append(`}`);
             } else {
-                if (type.fields.length > 0) {
-                    ctx.append(
-                        `return $sc~${ops.reader(type.name, "with-opcode", ctx)}();`,
+                if (contract.fields.length > 0) {
+                    wCtx.append(
+                        `return $sc~${ops.reader(contract.name, "with-opcode", wCtx)}();`,
                     );
                 } else {
-                    ctx.append(`return null();`);
+                    wCtx.append(`return null();`);
                 }
             }
         });
     });
 
     // Store function
-    ctx.fun(ops.contractStore(type.name, ctx), () => {
-        const sig = `() ${ops.contractStore(type.name, ctx)}(${resolveFuncType(type, ctx)} v)`;
-        ctx.signature(sig);
-        ctx.flag("impure");
-        ctx.flag("inline");
-        ctx.context("type:" + type.name + "$init");
-        ctx.body(() => {
-            ctx.append(`builder b = begin_cell();`);
+    wCtx.fun(ops.contractStore(contract.name, wCtx), () => {
+        const sig = `() ${ops.contractStore(contract.name, wCtx)}(${resolveFuncType(contract, wCtx)} v)`;
+        wCtx.signature(sig);
+        wCtx.flag("impure");
+        wCtx.flag("inline");
+        wCtx.context("type:" + contract.name + "$init");
+        wCtx.body(() => {
+            wCtx.append(`builder b = begin_cell();`);
 
             // Persist system cell
             if (
-                type.dependsOn.length > 0 &&
-                !enabledOptimizedChildCode(ctx.ctx)
+                contract.dependsOn.length > 0 &&
+                !enabledOptimizedChildCode(wCtx.ctx)
             ) {
-                ctx.append(`b = b.store_ref(__tact_child_contract_codes);`);
+                wCtx.append(`b = b.store_ref(__tact_child_contract_codes);`);
             }
 
-            if (type.init?.kind !== "contract-params") {
+            if (contract.init?.kind !== "contract-params") {
                 // Persist deployment flag
-                ctx.append(`b = b.store_int(true, 1);`);
+                wCtx.append(`b = b.store_int(true, 1);`);
             }
 
             // Build data
-            if (type.fields.length > 0) {
-                ctx.append(`b = ${ops.writer(type.name, ctx)}(b, v);`);
+            if (contract.fields.length > 0) {
+                wCtx.append(`b = ${ops.writer(contract.name, wCtx)}(b, v);`);
             }
 
             // Persist data
-            ctx.append(`set_data(b.end_cell());`);
+            wCtx.append(`set_data(b.end_cell());`);
         });
     });
 }
@@ -146,7 +135,7 @@ export function writeInit(
     t: TypeDescription,
     init: InitDescription,
     ctx: WriterContext,
-    codes: ContractsCodes,
+    codes: Readonly<ContractsCodes>,
 ) {
     ctx.fun(ops.contractInit(t.name, ctx), () => {
         const args = init.params.map(
@@ -171,7 +160,13 @@ export function writeInit(
             t.fields.forEach((tField) => {
                 let init = "null()";
                 if (tField.default !== undefined) {
-                    init = writeValue(tField.default!, ctx);
+                    init = writeValue(
+                        tField.default!,
+                        tField.type.kind === "ref"
+                            ? tField.type.optional
+                            : false,
+                        ctx,
+                    );
                 }
                 initValues.push(init);
             });
@@ -301,7 +296,7 @@ export function writeInit(
                     t.dependsOn.length > 0
                 ) {
                     ctx.append(
-                        `b = b.store_ref(begin_cell().store_dict(contracts).end_cell());`,
+                        `b = b.store_builder_ref(begin_cell().store_dict(contracts));`,
                     );
                 }
             }
@@ -397,20 +392,15 @@ export function writeMainContract(
             wCtx.append();
         }
 
-        wCtx.append(";; message opcode reader utility");
-        wCtx.append(
-            `;; Returns 32 bit message opcode, otherwise throws the "Invalid incoming message" exit code`,
-        );
-        wCtx.append(
-            `(slice, int) ~load_opcode(slice s) asm( -> 1 0) "32 LDUQ ${contractErrors.invalidMessage.id} THROWIFNOT";`,
-        );
-
         wCtx.append(`;;`);
         wCtx.append(`;; Routing of a Contract ${contract.name}`);
         wCtx.append(`;;`);
         wCtx.append();
 
         const contractReceivers = groupContractReceivers(contract);
+
+        writeLoadOpcode(contractReceivers.internal, wCtx);
+        wCtx.append();
 
         // Render internal receiver
         wCtx.inBlock(
@@ -429,17 +419,7 @@ export function writeMainContract(
                 wCtx.append(`__tact_context_sender = msg_sender_addr;`);
                 wCtx.append();
 
-                // Load self
-                wCtx.append(`;; Load contract data`);
-                const contractVariables = resolveFuncTypeFromAbiUnpack(
-                    "$self",
-                    getAllocation(wCtx.ctx, contract.name).ops,
-                    wCtx,
-                );
-                wCtx.append(
-                    `var ${contractVariables} = ${ops.contractLoad(contract.name, wCtx)}();`,
-                );
-                wCtx.append();
+                writeLoadContractVariables(contract, wCtx);
 
                 writeBouncedRouter(contractReceivers.bounced, contract, wCtx);
 
@@ -461,18 +441,11 @@ export function writeMainContract(
             typeof contractReceivers.external.fallback === "undefined"
         );
         if (hasExternal) {
+            writeLoadOpcode(contractReceivers.external, wCtx);
+            wCtx.append();
+
             wCtx.inBlock("() recv_external(slice in_msg) impure", () => {
-                // Load self
-                wCtx.append(`;; Load contract data`);
-                const contractVariables = resolveFuncTypeFromAbiUnpack(
-                    "$self",
-                    getAllocation(wCtx.ctx, contract.name).ops,
-                    wCtx,
-                );
-                wCtx.append(
-                    `var ${contractVariables} = ${ops.contractLoad(contract.name, wCtx)}();`,
-                );
-                wCtx.append();
+                writeLoadContractVariables(contract, wCtx);
 
                 writeNonBouncedRouter(
                     contractReceivers.external,
@@ -482,38 +455,123 @@ export function writeMainContract(
             });
         }
 
-        wCtx.append(`() __tact_selector_hack_asm() impure asm """
+        // fift injection, protected by a feature flag
+        if (enabledInternalExternalReceiversOutsideMethodsMap(wCtx.ctx)) {
+            wCtx.append(`
+() __tact_selector_hack_asm() impure asm """
 @atend @ 1 {
-    execute current@ context@ current!
-    {
-        }END> b>
-        
-        <{
-            SETCP0 DUP
-            IFNOTJMP:<{
-                DROP over <s ref@ 0 swap @procdictkeylen idict@ { "internal shortcut error" abort } ifnot @addop
-            }>`);
+        execute current@ context@ current!
+        {
+            // The core idea of this function is to save gas by avoiding unnecessary dict jump, when recv_internal/recv_external is called
+            // We want to extract recv_internal/recv_external from the dict and select needed function
+            // not by jumping to the needed function by it's index, but by using usual IF statements.
 
-        if (hasExternal) {
-            wCtx.append(`DUP -1 EQINT IFJMP:<{
-                DROP over <s ref@ -1 swap @procdictkeylen idict@ { "internal shortcut error" abort } ifnot @addop
-            }>`);
-        }
+            }END> b> // Close previous builder, now we have a cell of previous code on top of the stack
 
-        wCtx.append(`swap <s ref@
-            0 swap @procdictkeylen idict- drop
-            -1 swap @procdictkeylen idict- drop
-            65535 swap @procdictkeylen idict- drop
+            <{ // Start of the new code builder
+                SETCP0
+                // Swap the new code builder with the previous code, now we have previous code on top of the stack
+                swap
+                // Transform cell to slice and load first ref from the previous code, now we have the dict on top of the stack
+                <s ref@`);
+            if (hasExternal) {
+                wCtx.append(`
+                // Extract the recv_external from the dict
+                dup -1 swap @procdictkeylen idict@ { "internal shortcut error" abort } ifnot
+                swap`);
+            }
 
-            @procdictkeylen DICTPUSHCONST DICTIGETJMPZ 11 THROWARG
-        }> b>
-    } : }END>c
-    current@ context! current!
-} does @atend !
+            wCtx.append(`
+                // Extract the recv_internal from the dict
+                dup 0 swap @procdictkeylen idict@ { "internal shortcut error" abort } ifnot
+                swap
+
+                // Delete the recv_internal from the dict
+                0 swap @procdictkeylen idict- drop
+                // Delete the recv_external from the dict (it's okay if it's not there)
+                -1 swap @procdictkeylen idict- drop
+                // Delete the __tact_selector_hack from the dict
+                65535 swap @procdictkeylen idict- drop
+
+                // Bring the code builder from the bottom of the stack
+                // because if recv_external extraction is optional, and the number of elements on the stack is not fixed
+                depth 1- roll
+                // Swap with the dict from which we extracted recv_internal and (maybe) recv_external
+                swap
+
+                // Check if the dict is empty
+                dup null?
+                // Store a copy of this flag in the bottom of the stack
+                dup depth 1- -roll
+                {
+                    // If the dict is empty, just drop it (it will be null if it's empty)
+                    drop
+                }
+                {
+                    // If the dict is not empty, prepare continuation to be stored in c3
+                    <{
+                        // Save this dict as first ref in this continuation, it will be pushed in runtime by DICTPUSHCONST
+                        swap @procdictkeylen DICTPUSHCONST
+                        // Jump to the needed function by it's index
+                        DICTIGETJMPZ
+                        // If such key is not found, throw 11 along with the key as an argument
+                        11 THROWARG
+                    }> PUSHCONT
+                    // Store the continuation in c3
+                    c3 POP
+                } cond
+
+                // Function id is on top of the (runtime) stack
+                DUP IFNOTJMP:<{
+                    // place recv_internal here
+                    DROP swap @addop
+                }>`);
+
+            if (hasExternal) {
+                wCtx.append(`
+                DUP INC IFNOTJMP:<{
+                    // place recv_external here
+                    DROP swap @addop
+                }>`);
+            }
+
+            wCtx.append(`
+                // Bring back the flag, indicating if the dict is empty or not from the bottom of the stack
+                depth 1- roll
+                {
+                    // If the dict is empty, throw 11
+                    11 THROWARG
+                }
+                {
+                    // If the dict is not empty, jump to continuation from c3
+                    c3 PUSH JMPX
+                } cond
+            }> b>
+        } : }END>c
+        current@ context! current!
+    } does @atend !
 """;`);
 
-        wCtx.append(`() __tact_selector_hack() method_id(65535) {
+            wCtx.append(`
+() __tact_selector_hack() method_id(65535) {
     return __tact_selector_hack_asm();
 }`);
+        }
     });
+}
+
+function writeLoadContractVariables(
+    contract: TypeDescription,
+    wCtx: WriterContext,
+): void {
+    wCtx.append(";; Load contract data");
+    const contractVariables = resolveFuncTypeFromAbiUnpack(
+        "$self",
+        getAllocation(wCtx.ctx, contract.name).ops,
+        wCtx,
+    );
+    wCtx.append(
+        `var ${contractVariables} = ${ops.contractLoad(contract.name, wCtx)}();`,
+    );
+    wCtx.append();
 }

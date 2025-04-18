@@ -1,12 +1,12 @@
 import fc from "fast-check";
-import { getParser } from "../grammar";
-import { eqExpressions, getAstFactory } from "../ast/ast-helpers";
-import { diffAstObjects, randomAstExpression } from "./random.infra";
-import { prettyPrint } from "./ast-printer";
+import { getParser } from "@/grammar";
+import { eqExpressions, getAstFactory } from "@/ast/ast-helpers";
+import { diffAstObjects, randomAstExpression } from "@/ast/random.infra";
+import { prettyPrint } from "@/ast/ast-printer";
 
 describe("Pretty Print Expressions", () => {
     const maxDepth = 4;
-    const parser = getParser(getAstFactory(), "new");
+    const parser = getParser(getAstFactory());
 
     it(`should parse AstExpression`, () => {
         fc.assert(

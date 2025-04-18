@@ -1,11 +1,8 @@
 import type { ABIType, ABITypeRef } from "@ton/core";
-import { serializers } from "./serializers";
-import type {
-    AllocationCell,
-    AllocationOperation,
-} from "../../storage/operation";
-import { throwInternalCompilerError } from "../../error/errors";
-import type { Writer } from "../../utils/Writer";
+import { serializers } from "@/bindings/typescript/serializers";
+import type { AllocationCell, AllocationOperation } from "@/storage/operation";
+import { throwInternalCompilerError } from "@/error/errors";
+import type { Writer } from "@/utils/Writer";
 
 export const maxTupleSize = 15;
 
@@ -152,7 +149,7 @@ function writeSerializerField(gen: number, s: AllocationOperation, w: Writer) {
 }
 
 export function writeTupleParser(s: ABIType, w: Writer) {
-    w.append(`function loadTuple${s.name}(source: TupleReader) {`);
+    w.append(`export function loadTuple${s.name}(source: TupleReader) {`);
     w.inIndent(() => {
         if (s.fields.length <= maxTupleSize) {
             for (const f of s.fields) {
@@ -180,7 +177,7 @@ export function writeTupleParser(s: ABIType, w: Writer) {
 }
 
 export function writeGetterTupleParser(s: ABIType, w: Writer) {
-    w.append(`function loadGetterTuple${s.name}(source: TupleReader) {`);
+    w.append(`export function loadGetterTuple${s.name}(source: TupleReader) {`);
     w.inIndent(() => {
         for (const f of s.fields) {
             writeTupleFieldParser("_" + f.name, f.type, w, true);
@@ -214,7 +211,7 @@ function writeTupleFieldParser(
 }
 
 export function writeTupleSerializer(s: ABIType, w: Writer) {
-    w.append(`function storeTuple${s.name}(source: ${s.name}) {`);
+    w.append(`export function storeTuple${s.name}(source: ${s.name}) {`);
     w.inIndent(() => {
         w.append(`const builder = new TupleBuilder();`);
         for (const f of s.fields) {
@@ -243,7 +240,7 @@ function writeVariableToStack(name: string, type: ABITypeRef, w: Writer) {
 
 export function writeDictParser(s: ABIType, w: Writer) {
     w.write(`
-        function dictValueParser${s.name}(): DictionaryValue<${s.name}> {
+        export function dictValueParser${s.name}(): DictionaryValue<${s.name}> {
             return {
                 serialize: (src, builder) => {
                     builder.storeRef(beginCell().store(store${s.name}(src)).endCell());

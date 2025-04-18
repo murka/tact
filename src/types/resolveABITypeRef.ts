@@ -1,5 +1,5 @@
 import type { ABITypeRef } from "@ton/core";
-import type * as A from "../ast/ast";
+import type * as Ast from "@/ast/ast";
 import {
     eqNames,
     idText,
@@ -11,16 +11,16 @@ import {
     isSlice,
     isString,
     isStringBuilder,
-} from "../ast/ast-helpers";
+} from "@/ast/ast-helpers";
 import {
     idTextErr,
     throwCompilationError,
     throwInternalCompilerError,
-} from "../error/errors";
-import type { TypeRef } from "./types";
-import type { CompilerContext } from "../context/context";
-import { getType } from "./resolveDescriptors";
-import type { SrcInfo } from "../grammar";
+} from "@/error/errors";
+import type { TypeRef } from "@/types/types";
+import type { CompilerContext } from "@/context/context";
+import { getType } from "@/types/resolveDescriptors";
+import type { SrcInfo } from "@/grammar";
 
 type FormatDef = Record<
     string,
@@ -76,8 +76,8 @@ const builderFormats: FormatDef = {
 };
 
 type ResolveTypeOptions = {
-    readonly type: A.AstType;
-    readonly as: A.AstId | null;
+    readonly type: Ast.Type;
+    readonly as: Ast.Id | undefined;
     readonly loc: SrcInfo;
 };
 
@@ -94,7 +94,7 @@ export function resolveABIType({
         // Primitive types
         //
 
-        const typeId: A.AstTypeId =
+        const typeId: Ast.TypeId =
             type.kind === "type_id"
                 ? type
                 : type.typeArg.kind === "type_id"

@@ -1,43 +1,43 @@
-import type { CompilerContext } from "../context/context";
-import { getAllocation, getSortedTypes } from "../storage/resolveAllocation";
+import type { CompilerContext } from "@/context/context";
+import { getAllocation, getSortedTypes } from "@/storage/resolveAllocation";
 import {
     getAllStaticConstants,
     getAllStaticFunctions,
     getAllTypes,
     toBounced,
-} from "../types/resolveDescriptors";
-import type { WrittenFunction } from "./Writer";
-import { WriterContext } from "./Writer";
+} from "@/types/resolveDescriptors";
+import type { WrittenFunction } from "@/generator/Writer";
+import { WriterContext } from "@/generator/Writer";
 import {
     writeBouncedParser,
     writeOptionalParser,
     writeOptionalSerializer,
     writeParser,
     writeSerializer,
-} from "./writers/writeSerialization";
-import { writeStdlib } from "./writers/writeStdlib";
-import { writeAccessors } from "./writers/writeAccessors";
+} from "@/generator/writers/writeSerialization";
+import { writeStdlib } from "@/generator/writers/writeStdlib";
+import { writeAccessors } from "@/generator/writers/writeAccessors";
 import type { ContractABI } from "@ton/core";
-import { writeFunction } from "./writers/writeFunction";
-import { calculateIPFSlink } from "../utils/calculateIPFSlink";
-import { getRawAST } from "../context/store";
-import { emit } from "./emitter/emit";
+import { writeFunction } from "@/generator/writers/writeFunction";
+import { calculateIPFSlink } from "@/utils/calculateIPFSlink";
+import { getRawAST } from "@/context/store";
+import { emit } from "@/generator/emitter/emit";
 import {
     writeInit,
     writeMainContract,
-    writeStorageOps,
-} from "./writers/writeContract";
-import { funcInitIdOf } from "./writers/id";
-import { idToHex } from "../utils/idToHex";
-import { trimIndent } from "../utils/text";
-import type { ContractsCodes } from "./writers/writeContract";
-import { writeTypescriptValue } from "./writers/writeExpression";
+    writeContractStorageOps,
+} from "@/generator/writers/writeContract";
+import { funcInitIdOf } from "@/generator/writers/id";
+import { idToHex } from "@/utils/idToHex";
+import { trimIndent } from "@/utils/text";
+import type { ContractsCodes } from "@/generator/writers/writeContract";
+import { writeTypescriptValue } from "@/generator/writers/writeExpression";
 
 export async function writeProgram(
     ctx: CompilerContext,
     abiSrc: ContractABI,
     basename: string,
-    contractCodes: ContractsCodes,
+    contractCodes: Readonly<ContractsCodes>,
     debug: boolean,
 ) {
     //
@@ -261,8 +261,8 @@ export async function writeProgram(
     });
 
     return {
-        entrypoint: basename + ".code.fc",
-        files: [{ name: basename + ".code.fc", code }],
+        entrypoint: `${basename}.fc`,
+        funcFile: { name: `${basename}.fc`, code },
         constants,
         abi,
     };
@@ -318,7 +318,7 @@ function writeAll(
     wCtx: WriterContext,
     name: string,
     abiLink: string,
-    contractCodes: ContractsCodes,
+    contractCodes: Readonly<ContractsCodes>,
 ) {
     // Load all types
     const allTypes = getAllTypes(ctx);
@@ -346,19 +346,19 @@ function writeAll(
             );
             writeOptionalSerializer(t.name, t.origin, wCtx);
             writeParser(
+                t,
                 t.name,
                 t.kind === "contract",
                 "with-opcode",
                 allocation,
-                t.origin,
                 wCtx,
             );
             writeParser(
+                t,
                 t.name,
                 t.kind === "contract",
                 "no-opcode",
                 allocation,
-                t.origin,
                 wCtx,
             );
             writeOptionalParser(t.name, t.origin, wCtx);
@@ -391,11 +391,11 @@ function writeAll(
                 wCtx,
             );
             writeParser(
+                t,
                 funcInitIdOf(t.name),
                 false,
                 "with-opcode",
                 allocation,
-                t.origin,
                 wCtx,
             );
         }
@@ -404,7 +404,7 @@ function writeAll(
     // Storage Functions
     for (const t of sortedTypes) {
         if (t.kind === "contract") {
-            writeStorageOps(t, t.origin, wCtx);
+            writeContractStorageOps(t, wCtx);
         }
     }
 

@@ -13,6 +13,12 @@ export type OptimizationOptions = {
      * Read more: https://docs.tact-lang.org/book/config#alwayssavecontractdata
      */
     readonly alwaysSaveContractData?: boolean;
+
+    /**
+     * If set to `true`, stores internal and external receivers outside of the methods map. Default is `true`.
+     * When enabled, it saves gas but can cause the contract to be incorrectly recognized and misparsed by some explorers and user wallets.
+     */
+    readonly internalExternalReceiversOutsideMethodsMap?: boolean;
 };
 
 export type ExperimentalOptions = {
@@ -54,10 +60,6 @@ export type Options = {
      * Read more: https://docs.tact-lang.org/book/contracts#interfaces
      */
     readonly interfacesGetter?: boolean;
-    /**
-     * If set to "new", uses new parser. If set to "old", uses legacy parser. Default is "old".
-     */
-    readonly parser?: "new" | "old";
     /**
      * Experimental options that might be removed in the future. Use with caution!
      */
@@ -117,7 +119,7 @@ export type Project = {
     mode?: Mode;
 
     /**
-     * Set verbosity level (higher = more details), default: 1
+     * Sets the verbosity level — higher values produce more output. Default is 1.
      */
     verbose?: number;
 };

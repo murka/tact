@@ -1,4 +1,4 @@
-import type { AstExpression } from "../ast/ast";
+import type * as Ast from "@/ast/ast";
 import {
     AddSelf,
     AddZero,
@@ -16,14 +16,14 @@ import {
     OrSelf,
     OrTrue,
     SubtractSelf,
-} from "./algebraic";
+} from "@/optimizer/algebraic";
 import {
     AssociativeRule1,
     AssociativeRule2,
     AssociativeRule3,
-} from "./associative";
-import type { Rule, ExpressionTransformer } from "./types";
-import type { AstUtil } from "../ast/util";
+} from "@/optimizer/associative";
+import type { Rule, ExpressionTransformer } from "@/optimizer/types";
+import type { AstUtil } from "@/ast/util";
 
 type PrioritizedRule = { priority: number; rule: Rule };
 
@@ -59,7 +59,7 @@ export class StandardOptimizer implements ExpressionTransformer {
         this.rules.sort((r1, r2) => r1.priority - r2.priority);
     }
 
-    public applyRules = (ast: AstExpression): AstExpression => {
+    public applyRules = (ast: Ast.Expression): Ast.Expression => {
         return this.rules.reduce(
             (prev, prioritizedRule) =>
                 prioritizedRule.rule.applyRule(prev, this),

@@ -8,12 +8,33 @@ module.exports = {
     project: "./tsconfig.eslint.json",
   },
   ignorePatterns: ["*.cjs", "*.js"],
-  plugins: ["@typescript-eslint"],
+  plugins: ["@typescript-eslint", "jest", "import"],
   root: true,
   env: {
     node: true,
     es2021: true,
   },
+  settings: {
+    "import/resolver": {
+      alias: {
+        map: [["@", "./src"]],
+        extensions: [".ts", ".js", ".jsx", ".tsx"],
+      },
+    },
+  },
+  overrides: [
+    {
+      files: ["src/**/*.{js,ts,jsx,tsx}"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: ["./*", "../*", "!./**/output", "!../**/output"],
+          },
+        ],
+      },
+    },
+  ],
   rules: {
     "@typescript-eslint/consistent-type-imports": [
       "error",
@@ -101,5 +122,8 @@ module.exports = {
     "require-await": "off",
     "@typescript-eslint/require-await": "error",
     "@typescript-eslint/unified-signatures": "error",
+    "jest/no-focused-tests": "error",
+    "jest/no-identical-title": "error",
+    "jest/valid-expect": "error",
   },
 };

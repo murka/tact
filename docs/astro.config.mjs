@@ -23,6 +23,9 @@ import rehypeInlineCodeHighlighting from './inline-code-highlighting';
 // Add validation of internal links during production builds
 import starlightLinksValidator from 'starlight-links-validator';
 
+// Add generation of llms.txt, llms-full.txt and llms-small.txt
+import starlightLllmsTxt from 'starlight-llms-txt';
+
 // https://astro.build/config
 // https://starlight.astro.build/reference/configuration/
 export default defineConfig({
@@ -87,7 +90,6 @@ export default defineConfig({
 					langs: [
 						() => JSON.parse(fs.readFileSync('grammars/grammar-tact.json', 'utf-8')),
 						() => JSON.parse(fs.readFileSync('grammars/grammar-func.json', 'utf-8')),
-						() => JSON.parse(fs.readFileSync('grammars/grammar-ohm.json', 'utf-8'))
 					],
 				},
 			},
@@ -98,18 +100,36 @@ export default defineConfig({
 				'./src/fonts/katex.fontfaces.css',
 				'./src/katex.min.css',
 			],
-			plugins: [starlightLinksValidator({
-				errorOnFallbackPages: false,
-				// errorOnInvalidHashes: false,
-			})],
+			plugins: [
+				starlightLinksValidator({
+					errorOnFallbackPages: false,
+					// errorOnInvalidHashes: false,
+				}),
+				starlightLllmsTxt({
+					description: 'Tact is a powerful programming language for TON Blockchain focused on efficiency and simplicity. It is designed to be easy to learn and use, and to be a good fit for smart contracts.',
+					pageSeparator: '\n\n---\n\n',
+					exclude: [
+						// Excluding /ecosystem from llms-small.txt as it brings little value
+						// for LLMs and humans (as of now)
+						'ecosystem',
+						'ecosystem/**',
+					],
+					minify: {
+						note: false, // keep note asides
+						customSelectors: [
+							"a.web-ide-link" // "Open in Web IDE" links
+						],
+					},
+				}),
+			],
 			credits: false,
 			lastUpdated: true,
 			disable404Route: false,
-			// Note, that UI translations are bundled by Starlight for many languages:
+			// Note that UI translations are bundled by Starlight for many languages:
 			// https://starlight.astro.build/guides/i18n/#translate-starlights-ui
 			//
-			// Also note, that in order to use fallback content and translation notices
-			// provided by Starlight, files across language folders must be named the same!
+			// To use fallback content and translation notices provided by Starlight,
+			// files across language folders must be named the same!
 			defaultLocale: 'root', // removes language prefix from English pages
 			locales: {
 				root: {
@@ -130,6 +150,11 @@ export default defineConfig({
 					},
 					items: [
 						{ slug: 'book' },
+						{
+							slug: 'book/learn-tact-in-y-minutes',
+							badge: { variant: 'tip', text: 'new' },
+						},
+						// NOTE: saved for coming from other blockchains / languages
 						// {
 						// 	label: 'Cheatsheets',
 						// 	translations: {
@@ -189,6 +214,7 @@ export default defineConfig({
 						{ slug: 'book/import' },
 						{ slug: 'book/config' },
 						{ slug: 'book/func' },
+						{ slug: 'book/gas-best-practices' },
 						{ slug: 'book/security-best-practices' },
 					],
 				},
@@ -256,14 +282,17 @@ export default defineConfig({
 							link: 'ref/core-base#',
 						},
 						{ slug: 'ref/core-base' },
-						{ slug: 'ref/core-common' },
+						{ slug: 'ref/core-send' },
+						{ slug: 'ref/core-contextstate' },
 						{ slug: 'ref/core-comptime' },
-						{ slug: 'ref/core-debug' },
-						{ slug: 'ref/core-random' },
-						{ slug: 'ref/core-math' },
-						{ slug: 'ref/core-strings' },
 						{ slug: 'ref/core-cells' },
-						{ slug: 'ref/core-advanced' },
+						{ slug: 'ref/core-addresses' },
+						{ slug: 'ref/core-strings' },
+						{ slug: 'ref/core-debug' },
+						{ slug: 'ref/core-gas' },
+						{ slug: 'ref/core-crypto' },
+						{ slug: 'ref/core-math' },
+						{ slug: 'ref/core-random' },
 						{
 							label: 'Standard libraries',
 							translations: { 'zh-CN': '标准库' },
@@ -322,5 +351,7 @@ export default defineConfig({
 		'/ecosystem/tools/jetbrains': '/ecosystem/jetbrains',
 		'/ecosystem/tools/vscode': '/ecosystem/vscode',
 		'/ecosystem/tools/misti': '/ecosystem/misti',
+		'/ref/core-common': '/ref/core-send',
+		'/ref/core-advanced': '/ref/core-contextstate',
 	},
 });

@@ -1,5 +1,5 @@
-import type { CompilerContext } from "../context/context";
-import { createContextStore } from "../context/context";
+import type { CompilerContext } from "@/context/context";
+import { createContextStore } from "@/context/context";
 
 const featureStore = createContextStore<boolean | null | string>();
 
@@ -33,6 +33,12 @@ export function enabledNullChecks(ctx: CompilerContext) {
 
 export function enabledAlwaysSaveContractData(ctx: CompilerContext) {
     return featureEnabled(ctx, "alwaysSaveContractData");
+}
+
+export function enabledInternalExternalReceiversOutsideMethodsMap(
+    ctx: CompilerContext,
+) {
+    return featureEnabled(ctx, "internalExternalReceiversOutsideMethodsMap");
 }
 
 export function enabledLazyDeploymentCompletedGetter(ctx: CompilerContext) {

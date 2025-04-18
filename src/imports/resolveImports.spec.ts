@@ -1,9 +1,8 @@
-import { resolveImports } from "./resolveImports";
-import { createNodeFileSystem } from "../vfs/createNodeFileSystem";
+import { resolveImports } from "@/imports/resolveImports";
+import { createNodeFileSystem } from "@/vfs/createNodeFileSystem";
 import path from "path";
-import { getParser } from "../grammar";
-import { getAstFactory } from "../ast/ast-helpers";
-import { defaultParser } from "../grammar/grammar";
+import { getParser } from "@/grammar";
+import { getAstFactory } from "@/ast/ast-helpers";
 
 describe("resolveImports", () => {
     it("should resolve imports", () => {
@@ -18,7 +17,7 @@ describe("resolveImports", () => {
             project,
             stdlib,
             entrypoint: "./main.tact",
-            parser: getParser(ast, defaultParser),
+            parser: getParser(ast),
         });
         expect(resolved).toMatchObject({
             func: [

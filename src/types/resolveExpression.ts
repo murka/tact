@@ -1,13 +1,12 @@
-import type * as A from "../ast/ast";
-import { eqNames, getAstFactory, idText, isWildcard } from "../ast/ast-helpers";
+import type * as Ast from "@/ast/ast";
+import { eqNames, idText } from "@/ast/ast-helpers";
 import {
     idTextErr,
-    TactConstEvalError,
     throwCompilationError,
     throwInternalCompilerError,
-} from "../error/errors";
-import type { CompilerContext } from "../context/context";
-import { createContextStore } from "../context/context";
+} from "@/error/errors";
+import type { CompilerContext } from "@/context/context";
+import { createContextStore } from "@/context/context";
 import {
     getAllTypes,
     getStaticConstant,
@@ -15,25 +14,22 @@ import {
     getType,
     hasStaticConstant,
     hasStaticFunction,
-} from "./resolveDescriptors";
-import type { FunctionParameter, TypeRef } from "./types";
-import { printTypeRef, typeRefEquals } from "./types";
-import type { StatementContext } from "./resolveStatements";
-import { MapFunctions } from "../abi/map";
-import { GlobalFunctions } from "../abi/global";
-import { isAssignable, moreGeneralType } from "./subtyping";
-import { StructFunctions } from "../abi/struct";
-import { prettyPrint } from "../ast/ast-printer";
-import { ensureInt } from "../optimizer/interpreter";
-import { evalConstantExpression } from "../optimizer/constEval";
-import { getAstUtil } from "../ast/util";
+} from "@/types/resolveDescriptors";
+import type { FunctionParameter, TypeRef } from "@/types/types";
+import { printTypeRef, typeRefEquals } from "@/types/types";
+import type { StatementContext } from "@/types/resolveStatements";
+import { MapFunctions } from "@/abi/map";
+import { GlobalFunctions } from "@/abi/global";
+import { isAssignable, moreGeneralType } from "@/types/subtyping";
+import { StructFunctions } from "@/abi/struct";
+import { prettyPrint } from "@/ast/ast-printer";
 
 const store = createContextStore<{
-    ast: A.AstExpression;
+    ast: Ast.Expression;
     description: TypeRef;
 }>();
 
-export function getExpType(ctx: CompilerContext, exp: A.AstExpression) {
+export function getExpType(ctx: CompilerContext, exp: Ast.Expression) {
     const t = store.get(ctx, exp.id);
     if (!t) {
         throwInternalCompilerError(`Expression ${exp.id} not found`);
@@ -43,7 +39,7 @@ export function getExpType(ctx: CompilerContext, exp: A.AstExpression) {
 
 function registerExpType(
     ctx: CompilerContext,
-    exp: A.AstExpression,
+    exp: Ast.Expression,
     description: TypeRef,
 ): CompilerContext {
     const ex = store.get(ctx, exp.id);
@@ -60,7 +56,7 @@ function registerExpType(
 }
 
 function resolveBooleanLiteral(
-    exp: A.AstBoolean,
+    exp: Ast.Boolean,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -72,7 +68,7 @@ function resolveBooleanLiteral(
 }
 
 function resolveIntLiteral(
-    exp: A.AstNumber,
+    exp: Ast.Number,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -84,7 +80,7 @@ function resolveIntLiteral(
 }
 
 function resolveNullLiteral(
-    exp: A.AstNull,
+    exp: Ast.Null,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -92,7 +88,7 @@ function resolveNullLiteral(
 }
 
 function resolveAddressLiteral(
-    exp: A.AstAddress,
+    exp: Ast.Address,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -104,7 +100,7 @@ function resolveAddressLiteral(
 }
 
 function resolveCellLiteral(
-    exp: A.AstCell,
+    exp: Ast.Cell,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -116,7 +112,7 @@ function resolveCellLiteral(
 }
 
 function resolveSliceLiteral(
-    exp: A.AstSlice,
+    exp: Ast.Slice,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -128,7 +124,7 @@ function resolveSliceLiteral(
 }
 
 function resolveStringLiteral(
-    exp: A.AstString | A.AstSimplifiedString,
+    exp: Ast.String,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -140,7 +136,7 @@ function resolveStringLiteral(
 }
 
 function resolveStructNew(
-    exp: A.AstStructInstance | A.AstStructValue,
+    exp: Ast.StructInstance | Ast.StructValue,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -192,7 +188,7 @@ function resolveStructNew(
     for (const f of tp.fields) {
         if (
             !processed.has(f.name) &&
-            f.ast.initializer === null &&
+            f.ast.initializer === undefined &&
             !(f.type.kind === "ref" && f.type.optional)
         ) {
             throwCompilationError(
@@ -211,7 +207,7 @@ function resolveStructNew(
 }
 
 function resolveBinaryOp(
-    exp: A.AstOpBinary,
+    exp: Ast.OpBinary,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -248,30 +244,9 @@ function resolveBinaryOp(
                     );
                 }
 
-                // poor man's constant propagation analysis (very local)
-                // it works only in the case when the right-hand side is a constant expression
-                // and does not have any variables
-                if (exp.op === ">>" || exp.op === "<<") {
-                    try {
-                        const valBits = ensureInt(
-                            evalConstantExpression(
-                                exp.right,
-                                ctx,
-                                getAstUtil(getAstFactory()),
-                            ),
-                        );
-                        if (0n > valBits.value || valBits.value > 256n) {
-                            throwCompilationError(
-                                `the number of bits shifted ('${valBits.value}') must be within [0..256] range`,
-                                exp.right.loc,
-                            );
-                        }
-                    } catch (error) {
-                        if (!(error instanceof TactConstEvalError)) {
-                            throw error;
-                        }
-                    }
-                }
+                // The code that was here checking shift operators, was moved after
+                // resolveStatements since it is not safe to call evalConstantExpression
+                // before typechecking statements and expressions.
 
                 resolved = { kind: "ref", name: "Int", optional: false };
             }
@@ -377,7 +352,7 @@ function isEqualityType(ctx: CompilerContext, ty: TypeRef): boolean {
 }
 
 function resolveUnaryOp(
-    exp: A.AstOpUnary,
+    exp: Ast.OpUnary,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -437,7 +412,7 @@ function resolveUnaryOp(
 }
 
 function resolveFieldAccess(
-    exp: A.AstFieldAccess,
+    exp: Ast.FieldAccess,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -529,21 +504,23 @@ function resolveFieldAccess(
 }
 
 function checkParameterType(
-    expression: A.AstExpression,
+    expression: Ast.Expression,
     parameter: FunctionParameter,
     ctx: CompilerContext,
 ) {
     const t = getExpType(ctx, expression);
     if (!isAssignable(t, parameter.type)) {
+        // FIXME: this is non-descriptive of parameter name
+        const name = parameter.name.kind === "id" ? parameter.name : "_";
         throwCompilationError(
-            `Cannot pass an expression of type "${printTypeRef(t)}" to the parameter ${idTextErr(parameter.name)} of type "${printTypeRef(parameter.type)}"`,
+            `Cannot pass an expression of type "${printTypeRef(t)}" to the parameter ${idTextErr(name)} of type "${printTypeRef(parameter.type)}"`,
             expression.loc,
         );
     }
 }
 
 function resolveStaticCall(
-    exp: A.AstStaticCall,
+    exp: Ast.StaticCall,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -611,7 +588,7 @@ function resolveStaticCall(
 }
 
 function resolveCall(
-    exp: A.AstMethodCall,
+    exp: Ast.MethodCall,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -664,6 +641,18 @@ function resolveCall(
             }
             for (const [i, a] of f.params.entries()) {
                 checkParameterType(exp.args[i]!, a, ctx);
+            }
+
+            if (f.self) {
+                const selfIsOptional =
+                    f.self.kind === "ref" ? f.self.optional : false;
+
+                if (src.optional && !selfIsOptional) {
+                    throwCompilationError(
+                        `Cannot call method ${idTextErr(exp.method)} on an expression of type "${src.name}?" (optional ${src.name}) without unwrapping it with "!!" first`,
+                        exp.loc,
+                    );
+                }
             }
 
             return registerExpType(ctx, exp, f.returns);
@@ -749,7 +738,7 @@ function resolveCall(
 }
 
 function resolveInitOf(
-    ast: A.AstInitOf,
+    ast: Ast.InitOf,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -792,10 +781,7 @@ function resolveInitOf(
     });
 }
 
-function resolveCodeOf(
-    ast: A.AstCodeOf,
-    ctx: CompilerContext,
-): CompilerContext {
+function resolveCodeOf(ast: Ast.CodeOf, ctx: CompilerContext): CompilerContext {
     // Resolve type
     const type = getType(ctx, ast.contract);
     if (type.kind !== "contract") {
@@ -814,7 +800,7 @@ function resolveCodeOf(
 }
 
 function resolveConditional(
-    ast: A.AstConditional,
+    ast: Ast.Conditional,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -854,7 +840,7 @@ function resolveConditional(
 }
 
 export function resolveExpression(
-    exp: A.AstExpression,
+    exp: Ast.Expression,
     sctx: StatementContext,
     ctx: CompilerContext,
 ) {
@@ -880,10 +866,6 @@ export function resolveExpression(
         case "slice": {
             return resolveSliceLiteral(exp, sctx, ctx);
         }
-        case "simplified_string": {
-            // A simplified string is resolved as a string
-            return resolveStringLiteral(exp, sctx, ctx);
-        }
         case "struct_value": {
             // A struct value is resolved as a struct instance
             return resolveStructNew(exp, sctx, ctx);
@@ -902,13 +884,6 @@ export function resolveExpression(
             const v = sctx.vars.get(exp.text);
             if (!v) {
                 if (!hasStaticConstant(ctx, exp.text)) {
-                    if (isWildcard(exp)) {
-                        throwCompilationError(
-                            "Wildcard variable name '_' cannot be accessed",
-                            exp.loc,
-                        );
-                    }
-
                     // Handle static struct method calls
                     try {
                         const t = getType(ctx, exp.text);

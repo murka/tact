@@ -81,6 +81,15 @@ exports[`resolveStatements should fail statements for bounced-type-is-smaller 1`
 "
 `;
 
+exports[`resolveStatements should fail statements for call-non-optional-method-on-optional 1`] = `
+"<unknown>:10:13: Cannot call method "isNotNone" on an expression of type "Address?" (optional Address) without unwrapping it with "!!" first
+   9 |     receive() {
+> 10 |         if (self.addr.isNotNone()) {
+                   ^~~~~~~~~~~~~~~~~~~~~
+  11 |             throw(10);
+"
+`;
+
 exports[`resolveStatements should fail statements for codeOf 1`] = `
 "<unknown>:7:9: Type mismatch: "Cell" is not assignable to "Int"
   6 |     init() {
@@ -1089,15 +1098,6 @@ exports[`resolveStatements should fail statements for stmt-destructuring-fields-
 "
 `;
 
-exports[`resolveStatements should fail statements for stmt-destructuring-fields-non-existing-underscore 1`] = `
-"<unknown>:15:12: Field '"_"' not found in type 'S'
-  14 |     let s = S{ a: 1, b: 2, c: 3 };
-> 15 |     let S {_, b, c} =  s;
-                  ^
-  16 |     return b + c;
-"
-`;
-
 exports[`resolveStatements should fail statements for stmt-destructuring-fields-shadowed-const-id 1`] = `
 "<unknown>:17:16: Variable "x" is trying to shadow an existing constant with the same name
   16 |     let s = S{ a: 1, b: 2, c: 3 };
@@ -1827,33 +1827,6 @@ exports[`resolveStatements should fail statements for var-scope-while-shadows-ou
 "
 `;
 
-exports[`resolveStatements should fail statements for var-underscore-name-access 1`] = `
-"<unknown>:6:16: Wildcard variable name '_' cannot be accessed
-  5 |     foreach (_, _ in m) {
-> 6 |         return _;
-                     ^
-  7 |     }
-"
-`;
-
-exports[`resolveStatements should fail statements for var-underscore-name-access2 1`] = `
-"<unknown>:7:14: Wildcard variable name '_' cannot be accessed
-  6 |     foreach (_, v in m) {
-> 7 |         x += _;
-                   ^
-  8 |     }
-"
-`;
-
-exports[`resolveStatements should fail statements for var-underscore-name-access3 1`] = `
-"<unknown>:9:12: Wildcard variable name '_' cannot be accessed
-   8 |     let _: Int = someImpureFunction();
->  9 |     return _;
-                  ^
-  10 | }
-"
-`;
-
 exports[`resolveStatements should fail statements for wf-type-let 1`] = `
 "<unknown>:5:16: Invalid map type. Check https://docs.tact-lang.org/book/maps#allowed-types
   4 | fun foo() {
@@ -1917,6 +1890,38 @@ exports[`resolveStatements should resolve statements for constant-as-default-val
 exports[`resolveStatements should resolve statements for contract-getter-with-method-id-1 1`] = `
 [
   [
+    ""crc32"",
+    "String",
+  ],
+  [
+    "crc32("crc32")",
+    "Int",
+  ],
+  [
+    "42",
+    "Int",
+  ],
+  [
+    "crc32("crc32") + 42",
+    "Int",
+  ],
+  [
+    "0x3FFFF",
+    "Int",
+  ],
+  [
+    "(crc32("crc32") + 42) & 0x3FFFF",
+    "Int",
+  ],
+  [
+    "0x4000",
+    "Int",
+  ],
+  [
+    "(crc32("crc32") + 42) & 0x3FFFF | 0x4000",
+    "Int",
+  ],
+  [
     "0",
     "Int",
   ],
@@ -1927,6 +1932,10 @@ exports[`resolveStatements should resolve statements for contract-getter-with-me
 [
   [
     "16384",
+    "Int",
+  ],
+  [
+    "MethodId",
     "Int",
   ],
   [
@@ -1948,6 +1957,22 @@ exports[`resolveStatements should resolve statements for contract-getter-with-me
   ],
   [
     "16384 + 41",
+    "Int",
+  ],
+  [
+    "self",
+    "ManualMethodId",
+  ],
+  [
+    "self.methodId",
+    "Int",
+  ],
+  [
+    "1",
+    "Int",
+  ],
+  [
+    "self.methodId + 1",
     "Int",
   ],
   [

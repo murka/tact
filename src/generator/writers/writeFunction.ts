@@ -1,29 +1,30 @@
-import { enabledInline } from "../../config/features";
-import type * as A from "../../ast/ast";
+import { enabledInline } from "@/config/features";
+import type * as Ast from "@/ast/ast";
+import { idOfText, idText, tryExtractPath } from "@/ast/ast-helpers";
+import { getType, resolveTypeRef } from "@/types/resolveDescriptors";
+import { getExpType } from "@/types/resolveExpression";
+import type { FunctionDescription, TypeRef } from "@/types/types";
+import type { WriterContext } from "@/generator/Writer";
+import { resolveFuncPrimitive } from "@/generator/writers/resolveFuncPrimitive";
+import { resolveFuncType } from "@/generator/writers/resolveFuncType";
+import { resolveFuncTypeUnpack } from "@/generator/writers/resolveFuncTypeUnpack";
+import { funcIdOf } from "@/generator/writers/id";
 import {
-    idOfText,
-    idText,
-    isWildcard,
-    tryExtractPath,
-} from "../../ast/ast-helpers";
-import { getType, resolveTypeRef } from "../../types/resolveDescriptors";
-import { getExpType } from "../../types/resolveExpression";
-import type { FunctionDescription, TypeRef } from "../../types/types";
-import type { WriterContext } from "../Writer";
-import { resolveFuncPrimitive } from "./resolveFuncPrimitive";
-import { resolveFuncType } from "./resolveFuncType";
-import { resolveFuncTypeUnpack } from "./resolveFuncTypeUnpack";
-import { funcIdOf } from "./id";
-import { writeExpression, writePathExpression } from "./writeExpression";
-import { cast } from "./cast";
-import { resolveFuncTupleType } from "./resolveFuncTupleType";
-import { ops } from "./ops";
-import { freshIdentifier } from "./freshIdentifier";
-import { idTextErr, throwInternalCompilerError } from "../../error/errors";
-import { ppAsmShuffle } from "../../ast/ast-printer";
+    writeExpression,
+    writeExpressionInCondition,
+    writePathExpression,
+} from "@/generator/writers/writeExpression";
+import { cast } from "@/generator/writers/cast";
+import { resolveFuncTupleType } from "@/generator/writers/resolveFuncTupleType";
+import { ops } from "@/generator/writers/ops";
+import { freshIdentifier } from "@/generator/writers/freshIdentifier";
+import { idTextErr, throwInternalCompilerError } from "@/error/errors";
+import { ppAsmShuffle } from "@/ast/ast-printer";
+import { zip } from "@/utils/array";
+import { binaryOperationFromAugmentedAssignOperation } from "@/ast/util";
 
 export function writeCastedExpression(
-    expression: A.AstExpression,
+    expression: Ast.Expression,
     to: TypeRef,
     ctx: WriterContext,
 ) {
@@ -61,18 +62,24 @@ function unwrapExternal(
 }
 
 export function writeStatement(
-    f: A.AstStatement,
+    f: Ast.Statement,
     self: string | null,
-    returns: TypeRef | null,
+    returns: TypeRef | null | string,
     ctx: WriterContext,
 ) {
     switch (f.kind) {
         case "statement_return": {
             if (f.expression) {
+                if (typeof returns === "string" || returns === null) {
+                    throwInternalCompilerError(
+                        `Void return statement is not allowed in this context`,
+                        f.loc,
+                    );
+                }
                 // Format expression
                 const result = writeCastedExpression(
                     f.expression,
-                    returns!,
+                    returns,
                     ctx,
                 );
 
@@ -93,6 +100,10 @@ export function writeStatement(
                 if (self) {
                     ctx.append(`return (${self}, ());`);
                 } else {
+                    if (typeof returns === "string" && returns !== "") {
+                        // save contract state
+                        ctx.append(returns);
+                    }
                     ctx.append(`return ();`);
                 }
             }
@@ -100,14 +111,14 @@ export function writeStatement(
         }
         case "statement_let": {
             // Underscore name case
-            if (isWildcard(f.name)) {
+            if (f.name.kind === "wildcard") {
                 ctx.append(`${writeExpression(f.expression, ctx)};`);
                 return;
             }
 
             // Contract/struct case
             const t =
-                f.type === null
+                f.type === undefined
                     ? getExpType(ctx.ctx, f.expression)
                     : resolveTypeRef(ctx.ctx, f.type);
 
@@ -172,7 +183,18 @@ export function writeStatement(
             }
             const path = writePathExpression(lvaluePath);
             const t = getExpType(ctx.ctx, f.path);
-            const op = f.op === "&&" ? "&" : f.op === "||" ? "|" : f.op;
+
+            if (f.op === "&&=" || f.op === "||=") {
+                const rendered =
+                    f.op === "&&="
+                        ? `(${path} ? ${writeExpression(f.expression, ctx)} : (false))`
+                        : `(${path} ? (true) : ${writeExpression(f.expression, ctx)})`;
+
+                ctx.append(`${path} = ${cast(t, t, rendered, ctx)};`);
+                return;
+            }
+
+            const op = binaryOperationFromAugmentedAssignOperation(f.op);
             ctx.append(
                 `${path} = ${cast(t, t, `${path} ${op} ${writeExpression(f.expression, ctx)}`, ctx)};`,
             );
@@ -188,7 +210,9 @@ export function writeStatement(
             return;
         }
         case "statement_while": {
-            ctx.append(`while (${writeExpression(f.condition, ctx)}) {`);
+            ctx.append(
+                `while (${writeExpressionInCondition(f.condition, ctx)}) {`,
+            );
             ctx.inIndent(() => {
                 for (const s of f.statements) {
                     writeStatement(s, self, returns, ctx);
@@ -204,7 +228,9 @@ export function writeStatement(
                     writeStatement(s, self, returns, ctx);
                 }
             });
-            ctx.append(`} until (${writeExpression(f.condition, ctx)});`);
+            ctx.append(
+                `} until (${writeExpressionInCondition(f.condition, ctx)});`,
+            );
             return;
         }
         case "statement_repeat": {
@@ -227,7 +253,7 @@ export function writeStatement(
 
             const catchBlock = f.catchBlock;
             if (catchBlock !== undefined) {
-                if (isWildcard(catchBlock.catchName)) {
+                if (catchBlock.catchName.kind === "wildcard") {
                     ctx.append(`} catch (_) {`);
                 } else {
                     ctx.append(
@@ -263,12 +289,14 @@ export function writeStatement(
             }
 
             const flag = freshIdentifier("flag");
-            const key = isWildcard(f.keyName)
-                ? freshIdentifier("underscore")
-                : funcIdOf(f.keyName);
-            const value = isWildcard(f.valueName)
-                ? freshIdentifier("underscore")
-                : funcIdOf(f.valueName);
+            const key =
+                f.keyName.kind === "wildcard"
+                    ? freshIdentifier("underscore")
+                    : funcIdOf(f.keyName);
+            const value =
+                f.valueName.kind === "wildcard"
+                    ? freshIdentifier("underscore")
+                    : funcIdOf(f.valueName);
 
             // Handle Int key
             if (t.key === "Int") {
@@ -482,13 +510,14 @@ export function writeStatement(
                 if (!identifiers) return undefined;
                 return {
                     field,
+                    // FIXME
                     ...identifiers,
                 };
             });
 
             const leftHands = fields.map((field) => {
                 const id =
-                    field === undefined || isWildcard(field[1])
+                    field === undefined || field[1].kind === "wildcard"
                         ? "_"
                         : funcIdOf(field[1]);
 
@@ -528,15 +557,17 @@ export function writeStatement(
     throw Error("Unknown statement kind");
 }
 
+// HACK ALERT: if `returns` is a string, it contains the code to invoke before returning from a receiver
+// this is used to save the contract state before returning
 function writeCondition(
-    f: A.AstStatementCondition,
+    f: Ast.StatementCondition,
     self: string | null,
     elseif: boolean,
-    returns: TypeRef | null,
+    returns: TypeRef | null | string,
     ctx: WriterContext,
 ) {
     ctx.append(
-        `${elseif ? "} else" : ""}if (${writeExpression(f.condition, ctx)}) {`,
+        `${elseif ? "} else" : ""}if (${writeExpressionInCondition(f.condition, ctx)}) {`,
     );
     ctx.inIndent(() => {
         for (const s of f.trueStatements) {
@@ -588,9 +619,12 @@ export function writeFunction(f: FunctionDescription, ctx: WriterContext) {
             resolveFuncType(self, ctx, isSelfOpt) + " " + funcIdOf("self"),
         );
     }
-    for (const a of f.params) {
-        params.push(resolveFuncType(a.type, ctx) + " " + funcIdOf(a.name));
-    }
+
+    f.params.forEach((a, index) => {
+        const name =
+            a.name.kind === "wildcard" ? `_${index}` : funcIdOf(a.name);
+        params.push(resolveFuncType(a.type, ctx) + " " + name);
+    });
 
     const fAst = f.ast;
     switch (fAst.kind) {
@@ -677,7 +711,8 @@ export function writeFunction(f: FunctionDescription, ctx: WriterContext) {
                             !resolveFuncPrimitive(
                                 resolveTypeRef(ctx.ctx, a.type),
                                 ctx,
-                            )
+                            ) &&
+                            a.name.kind !== "wildcard"
                         ) {
                             ctx.append(
                                 `var (${resolveFuncTypeUnpack(resolveTypeRef(ctx.ctx, a.type), funcIdOf(a.name), ctx)}) = ${funcIdOf(a.name)};`,
@@ -726,20 +761,22 @@ export function writeFunction(f: FunctionDescription, ctx: WriterContext) {
 
 function getAsmFunctionSignature(
     f: FunctionDescription,
-    fAst: A.AstAsmFunctionDef,
+    fAst: Ast.AsmFunctionDef,
     params: string[],
 ) {
     const isMutable = fAst.attributes.some((a) => a.type === "mutates");
-    const hasSelfParam = fAst.params[0]?.name.text === "self";
+    const firstParam = fAst.params.at(0)?.name;
+    const hasSelfParam =
+        firstParam?.kind === "id" && firstParam.text === "self";
     const needRearrange =
         fAst.shuffle.ret.length === 0 &&
         fAst.shuffle.args.length > 1 &&
-        fAst.params.length > 1 &&
+        fAst.params.length === 2 && // apply only for `fun foo(self: T1, param: T2)`
         hasSelfParam &&
         !isMutable;
 
     if (!needRearrange) {
-        const asmShuffleEscaped: A.AstAsmShuffle = {
+        const asmShuffleEscaped: Ast.AsmShuffle = {
             ...fAst.shuffle,
             args: fAst.shuffle.args.map((id) => idOfText(funcIdOf(id))),
         };
@@ -752,15 +789,17 @@ function getAsmFunctionSignature(
 
     // Rearranges the parameters in the order described in Asm Shuffle
     //
-    // Foe example:
-    // `asm(other self) fun foo(self: Type, other: Type2)` generates as
-    //                  fun foo(other: Type2, self: Type)
-    const paramsDict = Object.fromEntries(
-        params.map((param, i) => [
-            i === 0 ? "self" : f.params[i - 1]!.name.text,
-            param,
-        ]),
-    );
+    // For example:
+    // `asm(other self) extends fun foo(self: Type, other: Type2)`
+    // generates as
+    // `extends fun foo(other: Type2, self: Type)`
+    const [headParam, ...tailParams] = params;
+    const paramsDict = Object.fromEntries([
+        ["self", headParam],
+        ...zip(f.params, tailParams).map(([a, b]) => {
+            return [a.name.kind === "id" ? a.name.text : "_", b] as const;
+        }),
+    ]);
 
     return {
         functionParams: fAst.shuffle.args.map((arg) => paramsDict[arg.text]!),
@@ -789,8 +828,11 @@ function writeNonMutatingFunction(
         }
         ctx.body(() => {
             const params = f.ast.params;
+            const firstParam = params.at(0)?.name;
             const withoutSelfParams =
-                params.length > 0 && params.at(0)?.name.text === "self"
+                params.length > 0 &&
+                firstParam?.kind === "id" &&
+                firstParam.text === "self"
                     ? params.slice(1)
                     : params;
             ctx.append(

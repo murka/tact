@@ -1,9 +1,10 @@
-import type { AstExpression, AstId, AstStatement } from "../ast/ast";
-import { idText, isSelfId, tryExtractPath } from "../ast/ast-helpers";
-import type { CompilerContext } from "../context/context";
-import { getAllTypes, getType } from "./resolveDescriptors";
-import { idTextErr, throwInternalCompilerError } from "../error/errors";
-import { getExpType } from "./resolveExpression";
+import type * as Ast from "@/ast/ast";
+import { idText, isSelfId, tryExtractPath } from "@/ast/ast-helpers";
+import type { CompilerContext } from "@/context/context";
+import { getAllTypes, getType } from "@/types/resolveDescriptors";
+import { idTextErr, throwInternalCompilerError } from "@/error/errors";
+import { getExpType } from "@/types/resolveExpression";
+import { StructFunctions } from "@/abi/struct";
 
 export type Effect = "contractStorageRead" | "contractStorageWrite";
 
@@ -13,7 +14,7 @@ export function computeReceiversEffects(ctx: CompilerContext) {
             for (const receiver of type.receivers) {
                 receiver.effects = statementListEffects(
                     receiver.ast.statements,
-                    new Set<AstId>(),
+                    new Set<Ast.Id>(),
                     ctx,
                 );
             }
@@ -22,8 +23,8 @@ export function computeReceiversEffects(ctx: CompilerContext) {
 }
 
 function statementListEffects(
-    statements: readonly AstStatement[],
-    processedContractMethods: ReadonlySet<AstId>,
+    statements: readonly Ast.Statement[],
+    processedContractMethods: ReadonlySet<Ast.Id>,
     ctx: CompilerContext,
 ): ReadonlySet<Effect> {
     return mapUnionAll(statements, (stmt) =>
@@ -32,8 +33,8 @@ function statementListEffects(
 }
 
 function statementEffects(
-    stmt: AstStatement,
-    processedContractMethods: ReadonlySet<AstId>,
+    stmt: Ast.Statement,
+    processedContractMethods: ReadonlySet<Ast.Id>,
     ctx: CompilerContext,
 ): ReadonlySet<Effect> {
     switch (stmt.kind) {
@@ -166,8 +167,8 @@ function statementEffects(
 }
 
 function expressionEffects(
-    expr: AstExpression,
-    processedContractMethods: ReadonlySet<AstId>,
+    expr: Ast.Expression,
+    processedContractMethods: ReadonlySet<Ast.Id>,
     ctx: CompilerContext,
 ): ReadonlySet<Effect> {
     switch (expr.kind) {
@@ -208,7 +209,6 @@ function expressionEffects(
         case "boolean":
         case "slice":
         case "null":
-        case "simplified_string":
         case "address":
         case "cell":
         case "struct_value":
@@ -273,9 +273,9 @@ function expressionEffects(
 }
 
 function methodEffects(
-    self: AstExpression,
-    method: AstId,
-    processedContractMethods: ReadonlySet<AstId>,
+    self: Ast.Expression,
+    method: Ast.Id,
+    processedContractMethods: ReadonlySet<Ast.Id>,
     ctx: CompilerContext,
 ): ReadonlySet<Effect> {
     const selfTypeRef = getExpType(ctx, self);
@@ -362,6 +362,16 @@ function methodEffects(
                 break;
             case "ref": {
                 const selfType = getType(ctx, selfTypeRef.name);
+
+                // Check if this is a struct type and if the method is in StructFunctions
+                if (
+                    selfType.kind === "struct" &&
+                    StructFunctions.has(idText(method))
+                ) {
+                    // For struct built-in functions like toCell(), we only need read access
+                    return new Set<Effect>(["contractStorageRead"]);
+                }
+
                 const methodDescr = selfType.functions.get(idText(method));
                 if (typeof methodDescr === "undefined") {
                     throwInternalCompilerError(

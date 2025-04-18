@@ -1,21 +1,18 @@
-import type * as A from "../ast/ast";
-import type { CompilerContext } from "../context/context";
-import { isAssignable } from "./subtyping";
-import type { FactoryAst } from "../ast/ast-helpers";
+import type * as Ast from "@/ast/ast";
+import type { CompilerContext } from "@/context/context";
+import { isAssignable } from "@/types/subtyping";
 import {
     tryExtractPath,
     eqNames,
-    isWildcard,
     isSelfId,
     idText,
     selfId,
-} from "../ast/ast-helpers";
+} from "@/ast/ast-helpers";
 import {
     idTextErr,
     throwCompilationError,
-    throwConstEvalError,
     throwInternalCompilerError,
-} from "../error/errors";
+} from "@/error/errors";
 import {
     getAllStaticFunctions,
     getStaticConstant,
@@ -23,16 +20,11 @@ import {
     hasStaticConstant,
     resolveTypeRef,
     getAllTypes,
-} from "./resolveDescriptors";
-import { getExpType, resolveExpression } from "./resolveExpression";
-import type { FunctionDescription, TypeRef } from "./types";
-import { printTypeRef } from "./types";
-import { evalConstantExpression } from "../optimizer/constEval";
-import { ensureInt } from "../optimizer/interpreter";
-import { crc16 } from "../utils/crc16";
-import type { SrcInfo } from "../grammar";
-import type { AstUtil } from "../ast/util";
-import { getAstUtil } from "../ast/util";
+} from "@/types/resolveDescriptors";
+import { getExpType, resolveExpression } from "@/types/resolveExpression";
+import type { FunctionDescription, TypeRef } from "@/types/types";
+import { printTypeRef } from "@/types/types";
+import type { SrcInfo } from "@/grammar";
 
 export type StatementContext = {
     root: SrcInfo;
@@ -56,11 +48,14 @@ export function emptyContext(
     };
 }
 
-function checkVariableExists(
+function ensureVariableDoesNotExist(
     ctx: CompilerContext,
     sctx: StatementContext,
-    name: A.AstId,
+    name: Ast.OptionalId,
 ): void {
+    if (name.kind !== "id") {
+        return;
+    }
     if (sctx.vars.has(idText(name))) {
         throwCompilationError(
             `Variable already exists: ${idTextErr(name)}`,
@@ -118,13 +113,13 @@ function removeRequiredVariable(
 }
 
 export function addVariable(
-    name: A.AstId,
+    name: Ast.OptionalId,
     ref: TypeRef,
     ctx: CompilerContext,
     sctx: StatementContext,
 ): StatementContext {
-    checkVariableExists(ctx, sctx, name); // Should happen earlier
-    if (isWildcard(name)) {
+    ensureVariableDoesNotExist(ctx, sctx, name); // Should happen earlier
+    if (name.kind === "wildcard") {
         return sctx;
     }
     return {
@@ -134,7 +129,7 @@ export function addVariable(
 }
 
 function processCondition(
-    condition: A.AstStatementCondition,
+    condition: Ast.StatementCondition,
     sctx: StatementContext,
     ctx: CompilerContext,
 ): {
@@ -147,7 +142,7 @@ function processCondition(
     let initialCtx = sctx;
 
     // Simple if
-    if (condition.falseStatements === null) {
+    if (condition.falseStatements === undefined) {
         const r = processStatements(condition.trueStatements, initialCtx, ctx);
         ctx = r.ctx;
         return { ctx, sctx: initialCtx, returnAlwaysReachable: false };
@@ -198,7 +193,7 @@ function processCondition(
 
 // Precondition: `self` here means a contract or a trait,
 // and not a `self` parameter of a mutating method
-export function isLvalue(path: A.AstId[], ctx: CompilerContext): boolean {
+export function isLvalue(path: Ast.Id[], ctx: CompilerContext): boolean {
     const headId = path[0]!;
     if (isSelfId(headId) && path.length > 1) {
         // we can be dealing with a contract/trait constant `self.constFoo`
@@ -220,7 +215,7 @@ export function isLvalue(path: A.AstId[], ctx: CompilerContext): boolean {
 }
 
 function processStatements(
-    statements: readonly A.AstStatement[],
+    statements: readonly Ast.Statement[],
     sctx: StatementContext,
     ctx: CompilerContext,
 ): {
@@ -245,11 +240,11 @@ function processStatements(
                     ctx = resolveExpression(s.expression, sctx, ctx);
 
                     // Check variable name
-                    checkVariableExists(ctx, sctx, s.name);
+                    ensureVariableDoesNotExist(ctx, sctx, s.name);
 
                     // Check type
                     const expressionType = getExpType(ctx, s.expression);
-                    if (s.type !== null) {
+                    if (s.type !== undefined) {
                         const variableType = resolveTypeRef(ctx, s.type);
                         if (!isAssignable(expressionType, variableType)) {
                             throwCompilationError(
@@ -259,15 +254,19 @@ function processStatements(
                         }
                         sctx = addVariable(s.name, variableType, ctx, sctx);
                     } else {
+                        // Here it's fine to display _ as variable name, because
+                        // let can have only one wildcard. In other cases it's not,
+                        // so we must not do it in `idTextErr`
+                        const name = s.name.kind === "id" ? s.name : "_";
                         if (expressionType.kind === "null") {
                             throwCompilationError(
-                                `Cannot infer type for ${idTextErr(s.name)}`,
+                                `Cannot infer type for ${idTextErr(name)}`,
                                 s.loc,
                             );
                         }
                         if (expressionType.kind === "void") {
                             throwCompilationError(
-                                `The inferred type of variable ${idTextErr(s.name)} is "void", which is not allowed`,
+                                `The inferred type of variable ${idTextErr(name)} is "void", which is not allowed`,
                                 s.loc,
                             );
                         }
@@ -362,29 +361,29 @@ function processStatements(
                         );
                     }
 
-                    if (s.op === "&&" || s.op === "||") {
+                    if (s.op === "&&=" || s.op === "||=") {
                         if (tailType.name !== "Bool") {
                             throwCompilationError(
-                                `Type error: Augmented assignment ${s.op}= is only allowed for Bool type`,
+                                `Type error: Augmented assignment ${s.op} is only allowed for Bool type`,
                                 s.path.loc,
                             );
                         }
                         if (expressionType.name !== "Bool") {
                             throwCompilationError(
-                                `Type error: Augmented assignment ${s.op}= is only allowed for Bool type`,
+                                `Type error: Augmented assignment ${s.op} is only allowed for Bool type`,
                                 s.expression.loc,
                             );
                         }
                     } else {
                         if (tailType.name !== "Int") {
                             throwCompilationError(
-                                `Type error: Augmented assignment ${s.op}= is only allowed for Int type`,
+                                `Type error: Augmented assignment ${s.op} is only allowed for Int type`,
                                 s.path.loc,
                             );
                         }
                         if (expressionType.name !== "Int") {
                             throwCompilationError(
-                                `Type error: Augmented assignment ${s.op}= is only allowed for Int type`,
+                                `Type error: Augmented assignment ${s.op} is only allowed for Int type`,
                                 s.expression.loc,
                             );
                         }
@@ -572,7 +571,7 @@ function processStatements(
 
                     let catchCtx = sctx;
                     // Process catchName variable for exit code
-                    checkVariableExists(
+                    ensureVariableDoesNotExist(
                         ctx,
                         initialSctx,
                         s.catchBlock.catchName,
@@ -634,8 +633,8 @@ function processStatements(
                 let foreachSctx = sctx;
 
                 // Add key and value to statement context
-                if (!isWildcard(s.keyName)) {
-                    checkVariableExists(ctx, initialSctx, s.keyName);
+                if (s.keyName.kind === "id") {
+                    ensureVariableDoesNotExist(ctx, initialSctx, s.keyName);
                     foreachSctx = addVariable(
                         s.keyName,
                         { kind: "ref", name: mapType.key, optional: false },
@@ -643,8 +642,8 @@ function processStatements(
                         initialSctx,
                     );
                 }
-                if (!isWildcard(s.valueName)) {
-                    checkVariableExists(ctx, foreachSctx, s.valueName);
+                if (s.valueName.kind === "id") {
+                    ensureVariableDoesNotExist(ctx, foreachSctx, s.valueName);
                     foreachSctx = addVariable(
                         s.valueName,
                         { kind: "ref", name: mapType.value, optional: false },
@@ -678,7 +677,7 @@ function processStatements(
 
                 // Check variable names
                 for (const [_, name] of s.identifiers.values()) {
-                    checkVariableExists(ctx, sctx, name);
+                    ensureVariableDoesNotExist(ctx, sctx, name);
                 }
 
                 // Check type
@@ -738,7 +737,7 @@ function processStatements(
                             field.loc,
                         );
                     }
-                    if (name.text !== "_") {
+                    if (name.kind === "id") {
                         sctx = addVariable(name, f.type, ctx, sctx);
                     }
                 });
@@ -758,7 +757,7 @@ function processStatements(
 }
 
 function processFunctionBody(
-    statements: readonly A.AstStatement[],
+    statements: readonly Ast.Statement[],
     sctx: StatementContext,
     ctx: CompilerContext,
 ): CompilerContext {
@@ -790,9 +789,7 @@ function processFunctionBody(
     return res.ctx;
 }
 
-export function resolveStatements(ctx: CompilerContext, Ast: FactoryAst) {
-    const util = getAstUtil(Ast);
-
+export function resolveStatements(ctx: CompilerContext) {
     // Process all static functions
     for (const f of getAllStaticFunctions(ctx)) {
         if (f.ast.kind === "function_def") {
@@ -823,8 +820,8 @@ export function resolveStatements(ctx: CompilerContext, Ast: FactoryAst) {
 
             // Required variables
             for (const f of t.fields) {
-                if (f.default !== undefined) {
-                    // NOTE: undefined is important here
+                if (f.ast.initializer !== undefined) {
+                    // If the field has an initializer, it is not a required variable.
                     continue;
                 }
                 if (isAssignable({ kind: "null" }, f.type)) {
@@ -928,7 +925,6 @@ export function resolveStatements(ctx: CompilerContext, Ast: FactoryAst) {
         }
 
         // Process functions
-        const methodIds: Map<number, string> = new Map();
         for (const f of t.functions.values()) {
             if (
                 f.ast.kind !== "native_function_decl" &&
@@ -945,19 +941,9 @@ export function resolveStatements(ctx: CompilerContext, Ast: FactoryAst) {
                 }
                 sctx = addVariable(selfId, f.self, ctx, sctx);
 
-                // Check for collisions in getter method IDs
+                // process method Ids of getters
                 if (f.isGetter) {
-                    const methodId = getMethodId(f, ctx, sctx, util);
-                    const existing = methodIds.get(methodId);
-                    if (existing) {
-                        throwCompilationError(
-                            `Method ID collision: getter '${f.name}' has the same method ID ${methodId} as getter '${existing}'\nPick a different getter name or explicit method ID to avoid collisions`,
-                            f.ast.name.loc,
-                        );
-                    } else {
-                        f.methodId = methodId;
-                        methodIds.set(methodId, f.name);
-                    }
+                    ctx = resolveMethodId(f, ctx, sctx);
                 }
 
                 for (const a of f.params) {
@@ -972,46 +958,11 @@ export function resolveStatements(ctx: CompilerContext, Ast: FactoryAst) {
     return ctx;
 }
 
-function checkMethodId(methodId: bigint, loc: SrcInfo) {
-    // method ids are 19-bit signed integers
-    if (methodId < -(2n ** 18n) || methodId >= 2n ** 18n) {
-        throwConstEvalError(
-            "method ids must fit 19-bit signed integer range",
-            true,
-            loc,
-        );
-    }
-    // method ids -4, -3, -2, -1, 0 ... 2^14 - 1 (inclusive) are kind of reserved by TVM
-    // for the upper bound see F12_n (CALL) TVM instruction
-    // and many small ids will be taken by internal procedures
-    //
-    // also, some ids are taken by the getters generated by Tact:
-    // supported_interfaces -> 113617
-    // lazy_deployment_completed -> 115390
-    // get_abi_ipfs -> 121275
-    if (-4n <= methodId && methodId < 2n ** 14n) {
-        throwConstEvalError(
-            "method ids cannot overlap with the TVM reserved ids: -4, -3, -2, -1, 0 ... 2^14 - 1",
-            true,
-            loc,
-        );
-    }
-    const tactGeneratedGetterMethodIds = [113617n, 115390n, 121275n];
-    if (tactGeneratedGetterMethodIds.includes(methodId)) {
-        throwConstEvalError(
-            `method ids cannot overlap with Tact reserved method ids: ${tactGeneratedGetterMethodIds.map((n) => n.toString()).join(", ")}`,
-            true,
-            loc,
-        );
-    }
-}
-
-function getMethodId(
+function resolveMethodId(
     funcDescr: FunctionDescription,
     ctx: CompilerContext,
     sctx: StatementContext,
-    util: AstUtil,
-): number {
+): CompilerContext {
     const optMethodId = funcDescr.ast.attributes.find(
         (attr) => attr.type === "get",
     )?.methodId;
@@ -1025,15 +976,7 @@ function getMethodId(
                 optMethodId.loc,
             );
         }
-
-        const methodId = ensureInt(
-            evalConstantExpression(optMethodId, ctx, util),
-        ).value;
-        checkMethodId(methodId, optMethodId.loc);
-        return Number(methodId);
-    } else {
-        const methodId = (crc16(funcDescr.name) & 0xffff) | 0x10000;
-        checkMethodId(BigInt(methodId), funcDescr.ast.loc);
-        return methodId;
     }
+
+    return ctx;
 }

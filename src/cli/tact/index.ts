@@ -1,25 +1,25 @@
 import { basename, dirname, normalize, resolve, join } from "path";
 import { ZodError } from "zod";
-import { createNodeFileSystem } from "../../vfs/createNodeFileSystem";
-import { createVirtualFileSystem } from "../../vfs/createVirtualFileSystem";
-import { parseAndEvalExpression } from "../../optimizer/interpreter";
-import { showValue } from "../../types/types";
-import type { Config, Project } from "../../config/parseConfig";
-import { parseConfig } from "../../config/parseConfig";
-import type { GetParserResult } from "../arg-parser";
-import { ArgParser } from "../arg-parser";
-import { CliErrors } from "./error-schema";
-import { CliLogger } from "../logger";
-import { ArgConsumer } from "../arg-consumer";
-import type { VirtualFileSystem } from "../../vfs/VirtualFileSystem";
-import { entries } from "../../utils/tricks";
-import { Logger, LogLevel } from "../../context/logger";
-import { build } from "../../pipeline/build";
-import type { TactErrorCollection } from "../../error/errors";
-import files from "../../stdlib/stdlib";
+import { createNodeFileSystem } from "@/vfs/createNodeFileSystem";
+import { createVirtualFileSystem } from "@/vfs/createVirtualFileSystem";
+import { parseAndEvalExpression } from "@/optimizer/interpreter";
+import type { Config, Project } from "@/config/parseConfig";
+import { parseConfig } from "@/config/parseConfig";
+import type { GetParserResult } from "@/cli/arg-parser";
+import { ArgParser } from "@/cli/arg-parser";
+import { CliErrors } from "@/cli/tact/error-schema";
+import { CliLogger } from "@/cli/logger";
+import { ArgConsumer } from "@/cli/arg-consumer";
+import type { VirtualFileSystem } from "@/vfs/VirtualFileSystem";
+import { entries } from "@/utils/tricks";
+import { Logger, LogLevel } from "@/context/logger";
+import { build } from "@/pipeline/build";
+import type { TactErrorCollection } from "@/error/errors";
+import * as Stdlib from "@/stdlib/stdlib";
 import { cwd } from "process";
-import { getVersion, showCommit } from "../version";
-import { watchAndCompile } from "./watch";
+import { getVersion, showCommit } from "@/cli/version";
+import { watchAndCompile } from "@/cli/tact/watch";
+import { prettyPrint } from "@/ast/ast-printer";
 
 export type Args = ArgConsumer<GetParserResult<ReturnType<typeof ArgSchema>>>;
 
@@ -268,7 +268,7 @@ const compile = async (
     }
     setConfigOptions(config, options);
 
-    const stdlib = createVirtualFileSystem("@stdlib", files);
+    const stdlib = createVirtualFileSystem("@stdlib", Stdlib.files);
 
     if (await noUnknownParams(Errors, Args)) {
         // TODO: all flags on the cli should take precedence over flags in the config
@@ -369,8 +369,15 @@ const evaluate = (expression: string) => {
     const result = parseAndEvalExpression(expression);
     switch (result.kind) {
         case "ok":
-            console.log(showValue(result.value));
-            process.exit(0);
+            {
+                if (result.value.kind === "number") {
+                    // all numbers get printed in base 10, even hex, oct and bin literals
+                    console.log(prettyPrint({ ...result.value, base: 10 }));
+                } else {
+                    console.log(prettyPrint(result.value));
+                }
+                process.exit(0);
+            }
             break;
         case "error": {
             console.log(result.message);

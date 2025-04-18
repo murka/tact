@@ -1,8 +1,8 @@
-import type { AstExpression } from "../ast/ast";
-import type { CompilerContext } from "../context/context";
-import type { WriterContext } from "../generator/Writer";
-import type { TypeRef } from "../types/types";
-import type { SrcInfo } from "../grammar";
+import type * as Ast from "@/ast/ast";
+import type { CompilerContext } from "@/context/context";
+import type { WriterContext } from "@/generator/Writer";
+import type { TypeRef } from "@/types/types";
+import type { SrcInfo } from "@/grammar";
 
 export type AbiFunction = {
     name: string;
@@ -14,7 +14,7 @@ export type AbiFunction = {
     generate: (
         ctx: WriterContext,
         args: readonly TypeRef[],
-        resolved: readonly AstExpression[],
+        resolved: readonly Ast.Expression[],
         loc: SrcInfo,
     ) => string;
 };

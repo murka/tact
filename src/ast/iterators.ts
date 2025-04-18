@@ -1,4 +1,4 @@
-import type { AstNode } from "./ast";
+import type { AstNode } from "@/ast/ast";
 
 /**
  * Recursively iterates over each node in an AstNode and applies a callback to each AST element.
@@ -114,7 +114,7 @@ export function traverseAndCheck(
         case "struct_decl":
         case "message_decl":
             traverseAndCheck(node.name, callback);
-            if (node.kind === "message_decl" && node.opcode !== null) {
+            if (node.kind === "message_decl" && node.opcode !== undefined) {
                 traverseAndCheck(node.opcode, callback);
             }
             node.fields.forEach((e) => {
@@ -319,13 +319,13 @@ export function traverseAndCheck(
             traverseAndCheck(node.thenBranch, callback);
             traverseAndCheck(node.elseBranch, callback);
             break;
+        case "wildcard":
         case "id":
         case "func_id":
         case "number":
         case "boolean":
         case "string":
         case "null":
-        case "simplified_string":
         case "address":
         case "cell":
         case "slice":

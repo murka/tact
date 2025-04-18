@@ -1,17 +1,15 @@
-import { contractErrors } from "../../abi/errors";
-import { throwInternalCompilerError } from "../../error/errors";
-import { dummySrcInfo } from "../../grammar";
-import type {
-    AllocationCell,
-    AllocationOperation,
-} from "../../storage/operation";
-import type { StorageAllocation } from "../../storage/StorageAllocation";
-import { getType } from "../../types/resolveDescriptors";
-import type { WriterContext } from "../Writer";
-import { ops } from "./ops";
-import { resolveFuncTypeFromAbi } from "./resolveFuncTypeFromAbi";
-import { resolveFuncTypeFromAbiUnpack } from "./resolveFuncTypeFromAbiUnpack";
-import type { ItemOrigin } from "../../imports/source";
+import { contractErrors } from "@/abi/errors";
+import { throwInternalCompilerError } from "@/error/errors";
+import { dummySrcInfo } from "@/grammar";
+import type { AllocationCell, AllocationOperation } from "@/storage/operation";
+import type { StorageAllocation } from "@/storage/StorageAllocation";
+import { getType } from "@/types/resolveDescriptors";
+import type { WriterContext } from "@/generator/Writer";
+import { ops } from "@/generator/writers/ops";
+import { resolveFuncTypeFromAbi } from "@/generator/writers/resolveFuncTypeFromAbi";
+import { resolveFuncTypeFromAbiUnpack } from "@/generator/writers/resolveFuncTypeFromAbiUnpack";
+import type { ItemOrigin } from "@/imports/source";
+import type { TypeDescription } from "@/types/types";
 
 const SMALL_STRUCT_MAX_FIELDS = 10;
 
@@ -109,7 +107,7 @@ function writeSerializerCell(
         ctx.append(`var build_${gen + 1} = begin_cell();`);
         writeSerializerCell(cell.next, gen + 1, ctx);
         ctx.append(
-            `build_${gen} = store_ref(build_${gen}, build_${gen + 1}.end_cell());`,
+            `build_${gen} = store_builder_ref(build_${gen}, build_${gen + 1});`,
         );
     }
 }
@@ -193,7 +191,7 @@ function writeSerializerField(
                     {
                         if (op.optional) {
                             ctx.append(
-                                `build_${gen} = ~ null?(${fieldName}) ? build_${gen}.store_int(true, 1).store_ref(${fieldName}) : build_${gen}.store_int(false, 1);`,
+                                `build_${gen} = build_${gen}.store_maybe_ref(${fieldName});`,
                             );
                         } else {
                             ctx.append(
@@ -221,11 +219,11 @@ function writeSerializerField(
                     {
                         if (op.optional) {
                             ctx.append(
-                                `build_${gen} = ~ null?(${fieldName}) ? build_${gen}.store_int(true, 1).store_ref(begin_cell().store_slice(${fieldName}).end_cell()) : build_${gen}.store_int(false, 1);`,
+                                `build_${gen} = build_${gen}.store_maybe_ref(begin_cell().store_slice(${fieldName}).end_cell());`,
                             );
                         } else {
                             ctx.append(
-                                `build_${gen} = build_${gen}.store_ref(begin_cell().store_slice(${fieldName}).end_cell());`,
+                                `build_${gen} = build_${gen}.store_builder_ref(begin_cell().store_slice(${fieldName}));`,
                             );
                         }
                     }
@@ -247,11 +245,11 @@ function writeSerializerField(
                     {
                         if (op.optional) {
                             ctx.append(
-                                `build_${gen} = ~ null?(${fieldName}) ? build_${gen}.store_int(true, 1).store_ref(begin_cell().store_slice(${fieldName}.end_cell().begin_parse()).end_cell()) : build_${gen}.store_int(false, 1);`,
+                                `build_${gen} = build_${gen}.store_maybe_ref(begin_cell().store_slice(${fieldName}).end_cell());`,
                             );
                         } else {
                             ctx.append(
-                                `build_${gen} = build_${gen}.store_ref(begin_cell().store_slice(${fieldName}.end_cell().begin_parse()).end_cell());`,
+                                `build_${gen} = build_${gen}.store_builder_ref(${fieldName});`,
                             );
                         }
                     }
@@ -270,11 +268,11 @@ function writeSerializerField(
         case "string": {
             if (op.optional) {
                 ctx.append(
-                    `build_${gen} = ~ null?(${fieldName}) ? build_${gen}.store_int(true, 1).store_ref(begin_cell().store_slice(${fieldName}).end_cell()) : build_${gen}.store_int(false, 1);`,
+                    `build_${gen} = build_${gen}.store_maybe_ref(begin_cell().store_slice(${fieldName}).end_cell());`,
                 );
             } else {
                 ctx.append(
-                    `build_${gen} = build_${gen}.store_ref(begin_cell().store_slice(${fieldName}).end_cell());`,
+                    `build_${gen} = build_${gen}.store_builder_ref(begin_cell().store_slice(${fieldName}));`,
                 );
             }
             return;
@@ -321,11 +319,11 @@ function writeSerializerField(
 //
 
 export function writeParser(
+    type: TypeDescription,
     name: string,
     forceInline: boolean,
     opcode: "with-opcode" | "no-opcode",
     allocation: StorageAllocation,
-    origin: ItemOrigin,
     ctx: WriterContext,
 ) {
     const isSmall = allocation.ops.length <= SMALL_STRUCT_MAX_FIELDS;
@@ -344,6 +342,7 @@ export function writeParser(
         ctx.body(() => {
             // Check prefix
             if (allocation.header && opcode === "with-opcode") {
+                ctx.flag("impure");
                 ctx.append(
                     `throw_unless(${contractErrors.invalidPrefix.id}, sc_0~load_uint(${allocation.header.bits}) == ${allocation.header.value});`,
                 );
@@ -379,7 +378,17 @@ export function writeParser(
             ctx.context("type:" + name);
             ctx.body(() => {
                 ctx.append(`var r = sc_0~${ops.reader(name, opcode, ctx)}();`);
-                ctx.append(`sc_0.end_parse();`);
+
+                // When we parse a message with an `as remaining` field, we don't advance the original slice,
+                // we just store it in that message field.
+                // `end_parse()` on the original slice in this case will generate exit code 9 (extra data remaining in cell),
+                // so we need to skip generation of the `end_parse()` call in this case.
+                const lastField = type.fields.at(-1);
+                const skipEndParse = lastField?.as === "remaining";
+
+                if (!skipEndParse) {
+                    ctx.append(`sc_0.end_parse();`);
+                }
                 ctx.append(`return r;`);
             });
         });
@@ -530,9 +539,7 @@ function writeFieldParser(
                 if (op.format !== "default") {
                     throw new Error(`Impossible`);
                 }
-                ctx.append(
-                    `${varName} = sc_${gen}~load_int(1) ? sc_${gen}~load_ref() : null();`,
-                );
+                ctx.append(`${varName} = sc_${gen}~load_maybe_ref();`);
             } else {
                 switch (op.format) {
                     case "default":
